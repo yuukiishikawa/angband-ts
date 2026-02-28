@@ -1,0 +1,14 @@
+{
+  "name": "@angband/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Angband core game logic (no DOM/Node dependencies)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "license": "GPL-2.0-or-later"
+}

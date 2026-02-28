@@ -1,0 +1,178 @@
+[
+  {
+    "name": "normal"
+  },
+  {
+    "name": "fox",
+    "combat": "-3:-3:3",
+    "obj-flags": "FEATHER | FREE_ACT",
+    "values": [
+      "STR[-3]",
+      "STEALTH[5]",
+      "BLOWS[1]",
+      "MOVES[1]"
+    ],
+    "blow": [
+      "bite",
+      "claw"
+    ]
+  },
+  {
+    "name": "Pukel-man",
+    "combat": "0:5:20",
+    "skill-save": "20",
+    "obj-flags": "SUST_STR | SUST_CON | PROT_STUN | REGEN | HOLD_LIFE",
+    "player-flags": "ROCK",
+    "values": [
+      "STR[4]",
+      "CON[4]",
+      "STEALTH[-2]",
+      "SPEED[-5]",
+      "RES_POIS[3]",
+      "RES_SHARD[1]",
+      "DAM_RED[10]"
+    ],
+    "effect": [
+      "CURE:POISONED",
+      "CURE:STUN"
+    ],
+    "blow": [
+      "punch",
+      "crush",
+      "thump",
+      "strike"
+    ]
+  },
+  {
+    "name": "bear",
+    "combat": "15:15:5",
+    "skill-disarm-phys": "-5",
+    "skill-disarm-magic": "-10",
+    "skill-melee": "10",
+    "obj-flags": "PROT_FEAR",
+    "values": [
+      "STR[3]",
+      "INT[-2]",
+      "CON[2]",
+      "INFRA[1]",
+      "STEALTH[-3]",
+      "BLOWS[1]"
+    ],
+    "blow": [
+      "cuff",
+      "clout",
+      "claw",
+      "hit",
+      "hit",
+      "swipe",
+      "slash"
+    ]
+  },
+  {
+    "name": "eagle",
+    "combat": "5:0:10",
+    "obj-flags": [
+      "SUST_WIS | PROT_BLIND | PROT_CONF | PROT_FEAR | SEE_INVIS | FREE_ACT",
+      "TRAP_IMMUNE"
+    ],
+    "values": [
+      "MOVES[3]"
+    ],
+    "blow": [
+      "peck",
+      "claw",
+      "claw",
+      "strike",
+      "tear"
+    ]
+  },
+  {
+    "name": "bat",
+    "combat": "0:-10:10",
+    "obj-flags": "FEATHER | SEE_INVIS | PROT_BLIND",
+    "values": [
+      "SPEED[3]",
+      "STEALTH[3]",
+      "INFRA[5]"
+    ],
+    "effect": "DAMAGE",
+    "dice": "5",
+    "effect-msg": "taking bat form",
+    "blow": [
+      "bite",
+      "scratch"
+    ]
+  },
+  {
+    "name": "warg",
+    "combat": "5:5:0",
+    "values": [
+      "BLOWS[2]"
+    ],
+    "effect": [
+      "DAMAGE",
+      "CURE:AFRAID",
+      "TIMED_INC:SHERO"
+    ],
+    "dice": [
+      "1d$S",
+      "5+1d20"
+    ],
+    "expr": "S:PLAYER_LEVEL:+ 0",
+    "effect-msg": "taking warg form",
+    "blow": [
+      "bite",
+      "bite",
+      "claw",
+      "tear"
+    ]
+  },
+  {
+    "name": "vampire",
+    "combat": "3:3:-5",
+    "obj-flags": "SEE_INVIS | HOLD_LIFE",
+    "values": [
+      "LIGHT[-1]",
+      "STEALTH[5]",
+      "INFRA[5]",
+      "SPEED[5]"
+    ],
+    "effect": [
+      "DAMAGE",
+      "TIMED_INC:ATT_VAMP"
+    ],
+    "dice": [
+      "$B",
+      "10+1d20"
+    ],
+    "expr": "B:PLAYER_HP:/ 4",
+    "effect-msg": "taking vampire form",
+    "blow": "bite"
+  },
+  {
+    "name": "werewolf",
+    "combat": "5:5:0",
+    "obj-flags": "REGEN",
+    "values": [
+      "BLOWS[1]",
+      "MOVES[1]"
+    ],
+    "effect-msg": "taking werewolf form",
+    "effect": [
+      "PROJECT_LOS:TURN_ALL",
+      "CURE:AFRAID",
+      "TIMED_INC:SHERO"
+    ],
+    "dice": [
+      "$B",
+      "5+1d20"
+    ],
+    "expr": "B:PLAYER_LEVEL:+ 0",
+    "blow": [
+      "bite",
+      "bite",
+      "slash",
+      "tear"
+    ]
+  }
+]

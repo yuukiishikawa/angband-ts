@@ -1,0 +1,137 @@
+[
+  {
+    "level-max": "monsters:1024",
+    "mon-gen": [
+      "chance:500",
+      "level-min:14",
+      "town-day:4",
+      "town-night:8",
+      "repro-max:100",
+      "ood-chance:25",
+      "ood-amount:10",
+      "group-max:25",
+      "group-dist:5"
+    ],
+    "mon-play": [
+      "break-glyph:550",
+      "mult-rate:8",
+      "life-drain:2",
+      "flee-range:5",
+      "turn-range:5"
+    ],
+    "dun-gen": [
+      "cent-max:100",
+      "door-max:200",
+      "wall-max:500",
+      "tunn-max:900",
+      "amt-room:9",
+      "amt-item:3",
+      "amt-gold:3",
+      "pit-max:2"
+    ],
+    "world": [
+      "max-depth:128",
+      "day-length:10000",
+      "dungeon-hgt:66",
+      "dungeon-wid:198",
+      "town-hgt:22",
+      "town-wid:66",
+      "feeling-total:100",
+      "feeling-need:10",
+      "stair-skip:1",
+      "move-energy:100"
+    ],
+    "carry-cap": [
+      "pack-size:23",
+      "quiver-size:10",
+      "quiver-slot-size:40",
+      "thrown-quiver-mult:5",
+      "floor-size:23"
+    ],
+    "store": [
+      "inven-max:24",
+      "turns:1000",
+      "shuffle:25",
+      "magic-level:5"
+    ],
+    "obj-make": [
+      "max-depth:100",
+      "great-obj:20",
+      "great-ego:20",
+      "fuel-torch:5000",
+      "fuel-lamp:15000",
+      "default-lamp:7500"
+    ],
+    "player": [
+      "max-sight:20",
+      "max-range:20",
+      "start-gold:600",
+      "food-value:100"
+    ],
+    "melee-critical": [
+      "debuff-toh:10",
+      "chance-weight-scale:1",
+      "chance-toh-scale:5",
+      "chance-level-scale:0",
+      "chance-toh-skill-scale:1",
+      "chance-offset:-60",
+      "chance-range:5000",
+      "power-weight-scale:1",
+      "power-random:650"
+    ],
+    "melee-critical-level": [
+      "400:2:5:HIT_GOOD",
+      "700:2:10:HIT_GREAT",
+      "900:3:15:HIT_SUPERB",
+      "1300:3:20:HIT_HI_GREAT",
+      "-1:4:20:HIT_HI_SUPERB"
+    ],
+    "ranged-critical": [
+      "debuff-toh:10",
+      "chance-weight-scale:1",
+      "chance-toh-scale:4",
+      "chance-level-scale:2",
+      "chance-launched-toh-skill-scale:0",
+      "chance-thrown-toh-skill-scale:0",
+      "chance-offset:0",
+      "chance-range:5000",
+      "power-weight-scale:1",
+      "power-random:500"
+    ],
+    "ranged-critical-level": [
+      "500:2:5:HIT_GOOD",
+      "1000:2:10:HIT_GREAT",
+      "-1:3:15:HIT_SUPERB"
+    ],
+    "o-melee-critical": [
+      "debuff-toh:10",
+      "power-toh-scale-numerator:1",
+      "power-toh-scale-denominator:3",
+      "chance-power-scale-numerator:1",
+      "chance-power-scale-denominator:1",
+      "chance-add-denominator:240"
+    ],
+    "o-melee-critical-level": [
+      "40:5:HIT_HI_SUPERB",
+      "12:4:HIT_HI_GREAT",
+      "3:3:HIT_SUPERB",
+      "2:2:HIT_GREAT",
+      "1:1:HIT_GOOD"
+    ],
+    "o-ranged-critical": [
+      "debuff-toh:10",
+      "power-launched-toh-scale-numerator:1",
+      "power-launched-toh-scale-denominator:1",
+      "power-thrown-toh-scale-numerator:3",
+      "power-thrown-toh-scale-denominator:2",
+      "chance-power-scale-numerator:1",
+      "chance-power-scale-denominator:1",
+      "chance-add-denominator:360"
+    ],
+    "o-ranged-critical-level": [
+      "50:3:HIT_SUPERB",
+      "10:2:HIT_GREAT",
+      "1:1:HIT_GOOD"
+    ]
+  }
+]

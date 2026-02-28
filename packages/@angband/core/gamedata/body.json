@@ -1,0 +1,19 @@
+[
+  {
+    "body": "Humanoid",
+    "slot": [
+      "WEAPON:weapon",
+      "BOW:shooting",
+      "RING:right hand",
+      "RING:left hand",
+      "AMULET:neck",
+      "LIGHT:light",
+      "BODY_ARMOR:body",
+      "CLOAK:back",
+      "SHIELD:arm",
+      "HAT:head",
+      "GLOVES:hands",
+      "BOOTS:feet"
+    ]
+  }
+]

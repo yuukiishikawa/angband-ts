@@ -1,0 +1,424 @@
+[
+  {
+    "code": "NONE"
+  },
+  {
+    "name": "unknown grid",
+    "graphics": ":w",
+    "priority": "2",
+    "code": "FLOOR"
+  },
+  {
+    "name": "open floor",
+    "graphics": ".:w",
+    "priority": "5",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "FLOOR",
+      "OBJECT",
+      "EASY",
+      "TRAP",
+      "TORCH"
+    ],
+    "desc": "An open floor or bare ground.  Can be walked across by anything, and can\nhold traps or items.  Does not break line of sight.",
+    "code": "CLOSED"
+  },
+  {
+    "name": "closed door",
+    "graphics": "+:U",
+    "priority": "17",
+    "flags": [
+      "DOOR_ANY",
+      "DOOR_CLOSED",
+      "INTERESTING"
+    ],
+    "digging": "5",
+    "confused-msg": "bangs into a door",
+    "desc": "Doors may be locked; getting through them may not be easy.  Your\ndisarming skill makes all the difference to your ability to handle locks,\nbut you can also take a pickaxe to them, or blast them open\nwith magic.  Monsters are also slowed down by doors; you can earn yourself\nvaluable time by locking them.",
+    "code": "OPEN"
+  },
+  {
+    "name": "open door",
+    "graphics": "':U",
+    "priority": "15",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "DOOR_ANY",
+      "INTERESTING",
+      "CLOSABLE",
+      "EASY"
+    ],
+    "look-in-preposition": "in",
+    "desc": "A door that is already open.  Player, monster, spell and missile can pass\nthrough as long as it stays open.",
+    "code": "BROKEN"
+  },
+  {
+    "name": "broken door",
+    "graphics": "':u",
+    "priority": "15",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "DOOR_ANY",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-in-preposition": "in",
+    "desc": "A door so broken that it cannot be shut.",
+    "code": "LESS"
+  },
+  {
+    "name": "up staircase",
+    "graphics": "<:w",
+    "priority": "25",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "STAIR",
+      "UPSTAIR",
+      "EASY",
+      "TORCH"
+    ],
+    "desc": "A staircase up to a shallower part of the dungeon.",
+    "code": "MORE"
+  },
+  {
+    "name": "down staircase",
+    "graphics": ">:w",
+    "priority": "25",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "STAIR",
+      "DOWNSTAIR",
+      "EASY",
+      "TORCH"
+    ],
+    "desc": "A staircase down to a deeper part of the dungeon.",
+    "code": "STORE_GENERAL"
+  },
+  {
+    "name": "General Store",
+    "graphics": "1:U",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "The General Store sells food, ammunition and lighting supplies.",
+    "code": "STORE_ARMOR"
+  },
+  {
+    "name": "Armoury",
+    "graphics": "2:s",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "The armour sold here will give you some protection against the blows of\nyour enemies.",
+    "code": "STORE_WEAPON"
+  },
+  {
+    "name": "Weapon Smiths",
+    "graphics": "3:w",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "Weapons for hitting and shooting your enemies are forged in the hot, acrid\nbackroom of this enticing shop.",
+    "code": "STORE_BOOK"
+  },
+  {
+    "name": "Bookseller",
+    "graphics": "4:g",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "A quiet, reflective place of refuge, lined with shelves of\nmystical tomes.",
+    "code": "STORE_ALCHEMY"
+  },
+  {
+    "name": "Alchemy Shop",
+    "graphics": "5:b",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "A dim, scented room where potions and scrolls are traded.",
+    "code": "STORE_MAGIC"
+  },
+  {
+    "name": "Magic Shop",
+    "graphics": "6:r",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "A shop for devices and adornments with magic trapped within.",
+    "code": "STORE_BLACK"
+  },
+  {
+    "name": "Black Market",
+    "graphics": "7:D",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "Watch your back and hold onto your purse as you enter this disreputable\nhaunt - and do not expect friendly service or good bargains.",
+    "code": "HOME"
+  },
+  {
+    "name": "Home",
+    "graphics": "8:y",
+    "priority": "20",
+    "flags": [
+      "SHOP",
+      "LOS",
+      "PROJECT",
+      "PASSABLE",
+      "PERMANENT",
+      "INTERESTING",
+      "EASY"
+    ],
+    "look-prefix": "the entrance to the",
+    "look-in-preposition": "at",
+    "desc": "Your safe piece of Middle Earth, and the only place you can store goods\napart from on your person.",
+    "code": "SECRET"
+  },
+  {
+    "name": "secret door",
+    "graphics": "#:w",
+    "priority": "10",
+    "mimic": "GRANITE",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "DOOR_ANY",
+      "GRANITE",
+      "TORCH"
+    ],
+    "digging": "5",
+    "confused-msg": "bashes into a wall",
+    "desc": "A door that appears like a granite wall to untrained eyes.",
+    "code": "RUBBLE"
+  },
+  {
+    "name": "pile of rubble",
+    "graphics": "::W",
+    "priority": "13",
+    "flags": [
+      "ROCK",
+      "NO_SCENT",
+      "NO_FLOW",
+      "INTERESTING",
+      "TORCH"
+    ],
+    "digging": "1",
+    "confused-msg": "bumps into some rocks",
+    "desc": "Ends LOS, stops missiles, bolts, and beams.  May dissolve or be tunnelled\nto normal floor.",
+    "code": "MAGMA"
+  },
+  {
+    "name": "magma vein",
+    "graphics": "%:D",
+    "priority": "12",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "NO_SCENT",
+      "NO_FLOW",
+      "MAGMA",
+      "TORCH"
+    ],
+    "digging": "2",
+    "confused-msg": "bashes into a wall",
+    "desc": "A seam of soft rock.  It can be removed by digging or magic, and passed\nthrough by immaterial monsters.  It stops any spells, missiles or line of\nsight.",
+    "code": "QUARTZ"
+  },
+  {
+    "name": "quartz vein",
+    "graphics": "%:s",
+    "priority": "11",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "NO_SCENT",
+      "NO_FLOW",
+      "QUARTZ",
+      "TORCH"
+    ],
+    "digging": "3",
+    "confused-msg": "bashes into a wall",
+    "desc": "A seam of hardish rock.  It can be removed by digging or magic, and passed\nthrough by immaterial monsters.  It stops any spells, missiles or line of\nsight.",
+    "code": "MAGMA_K"
+  },
+  {
+    "name": "magma vein with treasure",
+    "graphics": "*:o",
+    "priority": "19",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "INTERESTING",
+      "NO_SCENT",
+      "NO_FLOW",
+      "GOLD",
+      "MAGMA"
+    ],
+    "digging": "2",
+    "confused-msg": "bashes into a wall",
+    "desc": "A seam of soft rock.  It can be removed by digging or magic, and passed\nthrough by immaterial monsters.  It stops any spells, missiles or line of\nsight.  It contains visible treasure.",
+    "code": "QUARTZ_K"
+  },
+  {
+    "name": "quartz vein with treasure",
+    "graphics": "*:y",
+    "priority": "19",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "INTERESTING",
+      "NO_SCENT",
+      "NO_FLOW",
+      "GOLD",
+      "QUARTZ"
+    ],
+    "digging": "3",
+    "confused-msg": "bashes into a wall",
+    "desc": "A seam of hardish rock.  It can be removed by digging or magic, and passed\nthrough by immaterial monsters.  It stops any spells, missiles or line of\nsight.  It contains visible treasure.",
+    "code": "GRANITE"
+  },
+  {
+    "name": "granite wall",
+    "graphics": "#:W",
+    "priority": "10",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "GRANITE",
+      "NO_SCENT",
+      "NO_FLOW",
+      "TORCH"
+    ],
+    "digging": "4",
+    "confused-msg": "bashes into a wall",
+    "desc": "A seam of hard rock.  It can be removed by digging or magic, and passed\nthrough by immaterial monsters.  It stops any spells, missiles or line of\nsight.",
+    "code": "PERM"
+  },
+  {
+    "name": "permanent wall",
+    "graphics": "#:z",
+    "priority": "10",
+    "flags": [
+      "WALL",
+      "ROCK",
+      "PERMANENT",
+      "NO_SCENT",
+      "NO_FLOW"
+    ],
+    "confused-msg": "bashes into a wall",
+    "desc": "You can dig through most walls but these are impenetrable.  The dungeon is\nsurrounded by these kinds of walls and some special rooms are made of them.",
+    "code": "LAVA"
+  },
+  {
+    "name": "lava",
+    "graphics": "#:r",
+    "priority": "10",
+    "flags": [
+      "LOS",
+      "PROJECT",
+      "FIERY",
+      "PASSABLE",
+      "NO_SCENT",
+      "BRIGHT"
+    ],
+    "look-prefix": "some",
+    "desc": "A fiery pool of glowing lava.  Step in it at your peril!",
+    "walk-msg": "The lava will scald you!  Really step in?",
+    "run-msg": "Lava blocks your path.  Step into it?",
+    "hurt-msg": "The lava burns you!",
+    "die-msg": "burning to a cinder in lava",
+    "resist-flag": "IM_FIRE",
+    "code": "PASS_RUBBLE"
+  },
+  {
+    "name": "pile of passable rubble",
+    "graphics": "::u",
+    "priority": "13",
+    "flags": [
+      "ROCK",
+      "PASSABLE",
+      "INTERESTING",
+      "TORCH"
+    ],
+    "digging": "1",
+    "desc": "Ends LOS, stops missiles, bolts, and beams, and reduces the radius of ball\nspells.  May dissolve or be tunnelled to normal floor, and can be walked\nthrough by the player and monsters."
+  }
+]

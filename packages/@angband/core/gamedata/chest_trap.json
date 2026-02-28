@@ -1,0 +1,66 @@
+[
+  {
+    "name": "locked",
+    "code": "NO_TRAP",
+    "level": "1"
+  },
+  {
+    "name": "gas trap",
+    "code": "POISON",
+    "level": "1",
+    "effect": "TIMED_INC:POISONED",
+    "dice": "10+d20",
+    "msg": "A puff of green gas surrounds you!"
+  },
+  {
+    "name": "poison needle",
+    "code": "LOSE_STR",
+    "level": "2",
+    "effect": [
+      "DAMAGE",
+      "DRAIN_STAT:STR"
+    ],
+    "dice": "1d4",
+    "msg": "A small needle has pricked you!",
+    "msg-death": "a poison needle"
+  },
+  {
+    "name": "poison needle",
+    "code": "LOSE_CON",
+    "level": "3",
+    "effect": [
+      "DAMAGE",
+      "DRAIN_STAT:CON"
+    ],
+    "dice": "1d4",
+    "msg": "A small needle has pricked you!",
+    "msg-death": "a poison needle"
+  },
+  {
+    "name": "summoning runes",
+    "code": "SUMMON",
+    "level": "15",
+    "effect": "SUMMON:ANY",
+    "dice": "2+1d3",
+    "magic": "1",
+    "msg": "You are enveloped in a cloud of smoke!"
+  },
+  {
+    "name": "gas trap",
+    "code": "PARALYZE",
+    "level": "19",
+    "effect": "TIMED_INC:PARALYZED",
+    "dice": "10+d20",
+    "msg": "A puff of yellow gas surrounds you!"
+  },
+  {
+    "name": "explosion device",
+    "code": "EXPLODE",
+    "level": "25",
+    "effect": "DAMAGE",
+    "dice": "5d8",
+    "destroy": "1",
+    "msg": "There is a sudden explosion! Everything inside the chest is destroyed!",
+    "msg-death": "an exploding chest"
+  }
+]
