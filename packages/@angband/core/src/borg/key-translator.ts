@@ -53,6 +53,28 @@ const ITEM_COMMANDS = new Set([
   "quaff", "read", "eat", "zap", "aim", "use", "equip", "unequip", "drop",
 ]);
 
+/**
+ * Map C body.txt slot index → TS EquipSlot enum.
+ * C body order: WEAPON=0, BOW=1, RING_R=2, RING_L=3, AMULET=4,
+ *               LIGHT=5, BODY=6, CLOAK=7, SHIELD=8, HAT=9, GLOVES=10, BOOTS=11
+ * TS EquipSlot: NONE=0, WEAPON=1, BOW=2, RING=3, AMULET=4, ... BOOTS=11
+ * C has 2 ring slots (body[2] and body[3]); TS has 1 (EquipSlot.RING=3).
+ */
+const C_BODY_TO_EQUIP_SLOT: number[] = [
+  1,  // body[0] WEAPON → EquipSlot.WEAPON
+  2,  // body[1] BOW → EquipSlot.BOW
+  3,  // body[2] RING_R → EquipSlot.RING
+  3,  // body[3] RING_L → EquipSlot.RING
+  4,  // body[4] AMULET
+  5,  // body[5] LIGHT
+  6,  // body[6] BODY_ARMOR
+  7,  // body[7] CLOAK
+  8,  // body[8] SHIELD
+  9,  // body[9] HAT
+  10, // body[10] GLOVES
+  11, // body[11] BOOTS
+];
+
 export class KeyTranslator {
   private pending: PendingState | null = null;
 
@@ -103,7 +125,7 @@ export class KeyTranslator {
       const itemSlot = ALL_LETTERS_NOHJKL.indexOf(ch);
       if (itemSlot >= 0) {
         const itemCmd = this.pending.command;
-        process.stderr.write(`[KEY] ${itemCmd} item letter='${ch}' slot=${itemSlot}\n`);
+        console.error(`[KEY] ${itemCmd} item letter='${ch}' slot=${itemSlot}\n`);
 
         // aim needs direction after item
         if (itemCmd === "aim") {
@@ -211,7 +233,13 @@ export class KeyTranslator {
       case "zap":     return { type: CommandType.ZAP, itemIndex };
       case "use":     return { type: CommandType.USE, itemIndex };
       case "equip":   return { type: CommandType.EQUIP, itemIndex };
-      case "unequip": return { type: CommandType.UNEQUIP, itemIndex };
+      case "unequip": {
+        // C borg sends body slot index (0=weapon, 1=bow, ...); TS expects EquipSlot enum
+        const equipSlot = C_BODY_TO_EQUIP_SLOT[itemIndex];
+        if (equipSlot === undefined) return null;
+        console.error(`[KEY] unequip bodyIdx=${itemIndex} → equipSlot=${equipSlot}\n`);
+        return { type: CommandType.UNEQUIP, itemIndex: equipSlot };
+      }
       case "drop":    return { type: CommandType.DROP, itemIndex, quantity: 1 };
       default:
         return null;

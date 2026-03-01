@@ -215,7 +215,7 @@ export function cmdWalk(
   if (!isPassable(chunk, target)) {
     if (isWall(chunk, target)) {
       const sq = chunkGetSquare(chunk, target);
-      process.stderr.write(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
+      console.error(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
       return failResult(["There is a wall in the way!"]);
     }
     if (isRock(chunk, target)) {
@@ -252,7 +252,7 @@ export function cmdWalk(
       }
       addToInventory(player, obj);
       messages.push(`You pick up ${obj.kind.name}.`);
-      process.stderr.write(`[PICKUP] ${obj.kind.name} tval=${obj.tval} sval=${obj.sval}\n`);
+      console.error(`[PICKUP] ${obj.kind.name} tval=${obj.tval} sval=${obj.sval}\n`);
     }
   }
 
@@ -478,27 +478,26 @@ export function cmdTunnel(
     return successResult(STANDARD_ENERGY, ["You see nothing there to tunnel."]);
   }
 
-  // Calculate digging chance based on player skill
+  // Calculate digging chance based on player skill.
+  // Port of calc_digging_chances() from player-calcs.c:1651.
   const diggingSkill = player.state.skills[9] ?? 0; // SKILL_DIGGING
   const isRubble = squareIsFeat(chunk, target, Feat.RUBBLE);
 
-  // Difficulty: rubble < magma < quartz < granite
-  let difficulty: number;
+  let chance: number;
   if (isRubble) {
-    difficulty = 200;
+    chance = diggingSkill * 8;
   } else if (featHasFlag(chunk, target, TerrainFlag.MAGMA)) {
-    difficulty = 600;
+    chance = (diggingSkill - 10) * 4;
   } else if (featHasFlag(chunk, target, TerrainFlag.QUARTZ)) {
-    difficulty = 900;
+    chance = (diggingSkill - 20) * 2;
   } else if (featHasFlag(chunk, target, TerrainFlag.GRANITE)) {
-    difficulty = 1200;
+    chance = (diggingSkill - 40) * 1;
   } else {
-    // Closed door
-    difficulty = 400;
+    // Closed door: (skill * 4 - 119) / 3
+    chance = Math.floor((diggingSkill * 4 - 119) / 3);
   }
+  chance = Math.max(0, chance);
 
-  // Attempt to dig
-  const chance = Math.max(0, diggingSkill * 10 - difficulty);
   const success = chance > rng.randint0(1600);
 
   if (success) {
@@ -698,7 +697,7 @@ export function cmdGoUp(
   }
 
   // Go up one level
-  process.stderr.write(`[STAIRS-UP] depth ${player.depth} → ${player.depth - 1}\n`);
+  console.error(`[STAIRS-UP] depth ${player.depth} → ${player.depth - 1}\n`);
   player.depth -= 1;
   player.upkeep.createUpStair = false;
   player.upkeep.createDownStair = true;
@@ -727,7 +726,7 @@ export function cmdGoDown(
   }
 
   // Go down one level
-  process.stderr.write(`[STAIRS] depth ${player.depth} → ${player.depth + 1}\n`);
+  console.error(`[STAIRS] depth ${player.depth} → ${player.depth + 1}\n`);
   player.depth += 1;
   player.upkeep.createUpStair = true;
   player.upkeep.createDownStair = false;

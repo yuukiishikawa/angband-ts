@@ -76,3 +76,11 @@ export {
   // Main game loop
   runGameLoop,
 } from "./world.js";
+
+export {
+  findStartItemKind,
+  createStartObject,
+  giveStartingItems,
+  autoEquipStartingItems,
+  initializeNewPlayer,
+} from "./bootstrap.js";

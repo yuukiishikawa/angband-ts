@@ -28,7 +28,7 @@ import { incTimedEffect } from "../player/index.js";
 import { PY_FOOD_MAX } from "../player/index.js";
 import type { Effect } from "../types/index.js";
 import { EffectType } from "../effect/handler.js";
-import { Dice } from "../z/index.js";
+import { Dice, Aspect, randcalc } from "../z/index.js";
 
 import type { CommandResult } from "./magic.js";
 
@@ -56,7 +56,7 @@ function applyPotionEffect(eff: Effect, player: Player, rng: RNG, messages: stri
     }
     if (num > 0) {
       player.chp = Math.min(player.chp + num, player.mhp);
-      process.stderr.write(`[HEAL] +${num} hp, now ${player.chp}/${player.mhp}\n`);
+      console.error(`[HEAL] +${num} hp, now ${player.chp}/${player.mhp}\n`);
       if (num < 5) messages.push("You feel a little better.");
       else if (num < 15) messages.push("You feel better.");
       else if (num < 35) messages.push("You feel much better.");
@@ -346,14 +346,14 @@ export function cmdQuaff(
   }
 
   if (obj.tval !== TVal.POTION) {
-    process.stderr.write(`[QUAFF] Item at index ${itemIndex} is not a potion (tval=${obj.tval})\n`);
+    console.error(`[QUAFF] Item at index ${itemIndex} is not a potion (tval=${obj.tval})\n`);
     return {
       success: false,
       energyCost: 0,
       messages: ["You cannot quaff that!"],
     };
   }
-  process.stderr.write(`[QUAFF] Quaffing item at index ${itemIndex}: ${obj.kind?.name ?? 'unknown'} (tval=${obj.tval} effect=${obj.effect ? 'yes' : 'no'} pval=${obj.pval})\n`);
+  console.error(`[QUAFF] Quaffing item at index ${itemIndex}: ${obj.kind?.name ?? 'unknown'} (tval=${obj.tval} effect=${obj.effect ? 'yes' : 'no'} pval=${obj.pval})\n`);
 
   const messages: string[] = [];
   messages.push("You quaff the potion.");
@@ -440,16 +440,20 @@ function applyScrollEffect(
 ): void {
   if (eff.index === EffectType.TELEPORT) {
     // Phase Door / Teleport — move player to a random floor tile
-    const dist = eff.dice ? eff.dice.base : 10;
+    // Must use randcalc to properly evaluate dice including m_bonus.
+    // E.g. Teleportation scroll has dice "M60" → {base:0, m_bonus:60}
+    // Using just dice.base would give 0 (bug: teleport to same tile).
+    const dist = eff.dice
+      ? randcalc(rng, eff.dice, player.lev, Aspect.RANDOMISE)
+      : 10;
+    const actualDist = Math.max(dist, 2); // minimum distance of 2
     if (chunk) {
-      const newPos = findTeleportDest(player.grid, dist, chunk, rng);
+      const newPos = findTeleportDest(player.grid, actualDist, chunk, rng);
       if (newPos) {
-        // Clear player from old grid
-        const oldSq = chunk.squares[player.grid.y]?.[player.grid.x];
         // Move player
         player.grid = newPos;
         messages.push(dist <= 10 ? "You blink." : "You teleport away.");
-        process.stderr.write(`[SCROLL] TELEPORT dist=${dist} to (${newPos.x},${newPos.y})\n`);
+        console.error(`[SCROLL] TELEPORT dist=${actualDist} to (${newPos.x},${newPos.y})\n`);
       }
     }
   } else if (eff.index === EffectType.RECALL) {
@@ -460,7 +464,7 @@ function applyScrollEffect(
       player.upkeep.generateLevel = true;
       messages.push("The air about you becomes charged...");
       messages.push("You feel yourself yanked upwards!");
-      process.stderr.write(`[SCROLL] RECALL to town\n`);
+      console.error(`[SCROLL] RECALL to town\n`);
     } else {
       // In town → recall to deepest level
       const target = Math.max(1, player.recallDepth ?? 1);
@@ -468,7 +472,7 @@ function applyScrollEffect(
       player.upkeep.generateLevel = true;
       messages.push("The air about you becomes charged...");
       messages.push("You feel yourself yanked downwards!");
-      process.stderr.write(`[SCROLL] RECALL to depth=${target}\n`);
+      console.error(`[SCROLL] RECALL to depth=${target}\n`);
     }
   } else {
     // Reuse potion effect handler for shared effects (NOURISH, TIMED_INC, etc.)
@@ -485,10 +489,13 @@ function findTeleportDest(
   chunk: Chunk,
   rng: RNG,
 ): { x: number; y: number } | null {
-  // Try up to 100 random positions within range
-  for (let i = 0; i < 100; i++) {
+  const minDist = Math.max(1, Math.floor(maxDist / 5) + 1);
+  // Try up to 200 random positions within range
+  for (let i = 0; i < 200; i++) {
     const dx = rng.randint0(maxDist * 2 + 1) - maxDist;
     const dy = rng.randint0(maxDist * 2 + 1) - maxDist;
+    // Enforce minimum distance (matching C Angband behavior)
+    if (Math.abs(dx) + Math.abs(dy) < minDist) continue;
     const nx = from.x + dx;
     const ny = from.y + dy;
     if (nx < 1 || nx >= chunk.width - 1 || ny < 1 || ny >= chunk.height - 1) continue;
@@ -804,7 +811,7 @@ export function cmdPickup(
   if (!sq || sq.obj === null) {
     return { success: false, energyCost: 0, messages };
   }
-  process.stderr.write(`[PICKUP-TRY] at (${player.grid.x},${player.grid.y}) sq.obj=${sq.obj}\n`);
+  console.error(`[PICKUP-TRY] at (${player.grid.x},${player.grid.y}) sq.obj=${sq.obj}\n`);
 
   // Get the floor object from the chunk's object list
   const obj = chunk.objectList.get(sq.obj as number);
@@ -837,7 +844,7 @@ export function cmdPickup(
   addToInventory(player, obj);
   const name = obj.kind.name;
   messages.push(`You pick up ${name}.`);
-  process.stderr.write(`[PICKUP] ${name} tval=${obj.tval} sval=${obj.sval}\n`);
+  console.error(`[PICKUP] ${name} tval=${obj.tval} sval=${obj.sval}\n`);
 
   return { success: true, energyCost: STANDARD_ENERGY, messages };
 }
