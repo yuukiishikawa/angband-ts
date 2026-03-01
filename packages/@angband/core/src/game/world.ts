@@ -26,6 +26,9 @@ import type { GameCommand, CommandResult } from "../command/core.js";
 import { executeCommand, STANDARD_ENERGY } from "../command/core.js";
 import { updateView } from "../cave/view.js";
 import { updateNoise, updateScent } from "../cave/heatmap.js";
+import { squareSetFeat, squareIsFloor } from "../cave/square.js";
+import { Feat } from "../types/cave.js";
+import { loc } from "../z/index.js";
 import { generateDungeon, DEFAULT_DUNGEON_CONFIG } from "../generate/generate.js";
 import { monsterTakeTurn, monsterMove, monsterMultiply } from "../monster/move.js";
 import { pickMonsterRace, placeNewMonster, findSpawnPoint } from "../monster/make.js";
@@ -260,13 +263,50 @@ export function checkLevelChange(state: GameState): boolean {
  * @param newDepth - The target dungeon depth.
  */
 export function changeLevel(state: GameState, newDepth: number): void {
-  // Generate a new dungeon level with monster races
+  // Generate a new dungeon level with monster races and object kinds
   const newChunk = generateDungeon(
     newDepth,
     DEFAULT_DUNGEON_CONFIG,
     state.rng,
     state.monsterRaces,
+    state.objectKinds,
+    state.egoItems ?? [],
   );
+  process.stderr.write(`[LEVEL] Generated depth=${newDepth}: objects=${newChunk.objectList.size} monsters=${newChunk.monsters.length} kinds=${state.objectKinds.length}\n`);
+
+  // For dungeon levels (depth > 0), place an extra down stair near the up stair
+  // so the C borg can find it without traversing the entire dungeon.
+  if (newDepth > 0) {
+    // Find the up stair (player start position)
+    let upX = -1, upY = -1;
+    for (let y = 1; y < newChunk.height - 1 && upX < 0; y++) {
+      for (let x = 1; x < newChunk.width - 1; x++) {
+        if (newChunk.squares[y]![x]!.feat === Feat.LESS) {
+          upX = x; upY = y; break;
+        }
+      }
+    }
+    if (upX >= 0) {
+      // Search outward from the up stair for the closest floor tile.
+      // Start at radius 1 to ensure the stair is in the same room/corridor.
+      let placed = false;
+      for (let radius = 1; radius <= 30 && !placed; radius++) {
+        for (let dy = -radius; dy <= radius && !placed; dy++) {
+          for (let dx = -radius; dx <= radius && !placed; dx++) {
+            if (Math.abs(dx) < radius && Math.abs(dy) < radius) continue;
+            const nx = upX + dx, ny = upY + dy;
+            if (nx < 1 || ny < 1 || nx >= newChunk.width - 1 || ny >= newChunk.height - 1) continue;
+            const sq = newChunk.squares[ny]![nx]!;
+            if (sq.feat === Feat.FLOOR) {
+              squareSetFeat(newChunk, loc(nx, ny), Feat.MORE);
+              process.stderr.write(`[LEVEL] Extra down stair at (${nx},${ny}) near up@(${upX},${upY}) dist=${Math.abs(dx)+Math.abs(dy)}\n`);
+              placed = true;
+            }
+          }
+        }
+      }
+    }
+  }
 
   // Find a floor square for the player to start on
   // (prefer an up/down stair position from the generated level)
@@ -627,6 +667,12 @@ export async function processPlayer(
       state.rng,
     );
 
+    // Debug: log failed commands to stderr
+    if (!result.success && result.messages.length > 0) {
+      const dirInfo = 'direction' in cmd ? ` dir=${(cmd as {direction:number}).direction}` : '';
+      process.stderr.write(`[CMD-FAIL] type=${cmd.type}${dirInfo} pos=(${state.player.grid.x},${state.player.grid.y}) depth=${state.player.depth} msg=${result.messages[0]}\n`);
+    }
+
     // Apply messages (only show on first and last iteration to avoid spam)
     if (rep === 0 || rep === nrepeat - 1) {
       for (const msg of result.messages) {
@@ -710,22 +756,29 @@ export function processDeadMonsters(state: GameState): void {
         (obj as { oidx: number }).oidx = nextObjId;
         chunk.objectList.set(nextObjId, obj);
 
-        // Place on the grid
+        // Place on the grid — chain with any existing object
         const sq = chunk.squares[mon.grid.y]?.[mon.grid.x];
         if (sq) {
+          if (sq.obj !== null) {
+            const existing = chunk.objectList.get(sq.obj as number);
+            if (existing) {
+              (obj as { next: ObjectType | null }).next = existing;
+            }
+          }
           (sq as { obj: number | null }).obj = nextObjId;
         }
       }
     }
 
-    // Clear monster from the grid
+    // Clear monster from the grid (only if the square still references this
+    // monster — another monster may have taken the square via KILL_BODY)
     const sq = chunk.squares[mon.grid.y]?.[mon.grid.x];
-    if (sq) {
+    if (sq && sq.mon === mon.midx) {
       (sq as { mon: number }).mon = 0;
     }
 
-    // Remove from monsters array
-    state.monsters.splice(i, 1);
+    // Null out the monster slot (do NOT splice — preserves midx invariant)
+    (chunk.monsters as (Monster | null)[])[mon.midx] = null;
     (chunk as { monCnt: number }).monCnt = Math.max(0, chunk.monCnt - 1);
 
     // Note: combat.ts already adds "You have slain the X!" to the command result messages.
@@ -751,7 +804,6 @@ function checkExperience(state: GameState): void {
     // This gives the XP threshold to advance FROM current level.
     const needed = expForPlayerLevel(player, player.lev);
     if (needed <= 0 || player.exp < needed) {
-      process.stderr.write(`[LVL] CL${player.lev}: exp=${player.exp}, need=${needed} for CL${player.lev + 1} — not enough\n`);
       break;
     }
 
@@ -888,6 +940,9 @@ export async function runGameLoop(
 
     // 4. Process monsters
     processMonsters(state, state.monsters);
+
+    // Clean up monsters killed by other monsters (KILL_BODY etc.)
+    processDeadMonsters(state);
 
     // Check for death after monsters
     if (state.player.isDead) {

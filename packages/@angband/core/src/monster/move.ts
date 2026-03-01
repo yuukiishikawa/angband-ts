@@ -248,13 +248,20 @@ export function monsterMove(
     if (mon.race.flags.has(MonsterRaceFlag.KILL_BODY)) {
       // Kill the other monster
       // Find the target monster in chunk.monsters
-      const targetMon = chunk.monsters.find((m) => m.midx === newSq.mon);
+      const targetMon = chunk.monsters.find((m) => m && m.midx === newSq.mon);
       if (targetMon) {
         targetMon.hp = 0; // Will be cleaned up by processDeadMonsters
       }
+      // Clear the killer's old square (KILL_BODY doesn't swap)
+      if (chunkContains(chunk, oldLoc)) {
+        const oldSq = chunkGetSquare(chunk, oldLoc);
+        if (oldSq.mon === mon.midx) {
+          oldSq.mon = 0 as MonsterId;
+        }
+      }
     } else if (mon.race.flags.has(MonsterRaceFlag.MOVE_BODY)) {
       // Swap positions: push the other monster to our old square
-      const targetMon = chunk.monsters.find((m) => m.midx === newSq.mon);
+      const targetMon = chunk.monsters.find((m) => m && m.midx === newSq.mon);
       if (targetMon) {
         targetMon.grid = oldLoc;
         const oldSq = chunkGetSquare(chunk, oldLoc);

@@ -405,7 +405,7 @@ export function executeCommand(
     case CommandType.QUAFF:
       return cmdQuaff(player, cmd.itemIndex, rng);
     case CommandType.READ:
-      return cmdRead(player, cmd.itemIndex, rng);
+      return cmdRead(player, cmd.itemIndex, rng, chunk);
     case CommandType.AIM:
       return cmdAim(player, cmd.itemIndex, cmd.direction, rng);
     case CommandType.ZAP:
@@ -495,7 +495,10 @@ function cmdAlter(
     return cmdTunnel(player, chunk, dir, rng);
   }
 
-  return failResult(["You see nothing to alter there."]);
+  // In the C game, do_cmd_alter() always uses a turn even if nothing
+  // happens.  Return success with energy cost so the borg doesn't
+  // retry the same ALTER infinitely (which wastes hundreds of turns).
+  return successResult(STANDARD_ENERGY, ["You see nothing to alter there."]);
 }
 
 // ── Safe predicate wrappers ──

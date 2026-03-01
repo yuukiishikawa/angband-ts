@@ -261,6 +261,11 @@ export function cmdAttack(
     process.stderr.write(`[ATK] sq.mon=${sq.mon}, direct[${sq.mon}]=${directMon ? `midx=${directMon.midx},hp=${directMon.hp}` : 'null'}, scan=${mon ? `midx=${mon.midx},hp=${mon.hp}` : 'null'}, monsters.len=${chunk.monsters.length}\n`);
   }
   if (!mon) {
+    // Clear stale monster reference to prevent infinite attack loops
+    if (sq.mon > 0) {
+      process.stderr.write(`[ATK-FIX] Clearing stale sq.mon=${sq.mon} at (${target.x},${target.y})\n`);
+      (sq as { mon: number }).mon = 0;
+    }
     return failResult(["You see nothing there to attack."]);
   }
 
