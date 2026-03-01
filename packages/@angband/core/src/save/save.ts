@@ -547,7 +547,7 @@ export function saveGame(
     width: chunk.width,
     feelingSquares: chunk.feelingSquares,
     squares: squaresData,
-    monsters: monsters.map(serializeMonster),
+    monsters: monsters.filter((m): m is Monster => m != null && m.hp > 0).map(serializeMonster),
     objects: objects.map(serializeObject),
     monMax: chunk.monMax,
     monCnt: chunk.monCnt,

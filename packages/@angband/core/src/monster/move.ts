@@ -447,6 +447,16 @@ const MAX_REPRO = 100;
  * @param rng   - Random number generator
  * @returns True if a clone was successfully placed
  */
+/**
+ * Port of C monster_turn_multiply().
+ * Rate-limited by adjacent monster count:
+ *   - 4+ adjacent: never breed
+ *   - 0 adjacent: always attempt
+ *   - 1-3 adjacent: 1/(k * REPRO_RATE) chance
+ * Successful breeding costs the monster's turn.
+ */
+const REPRO_RATE = 8; // C: z_info->repro_monster_rate
+
 export function monsterMultiply(
   chunk: Chunk,
   mon: Monster,
@@ -456,6 +466,23 @@ export function monsterMultiply(
 
   // Cap total breeders on the level
   if (chunk.numRepro >= MAX_REPRO) return false;
+
+  // Count adjacent monsters (C: k < 4 check)
+  let adjacentMons = 0;
+  for (const dir of DIRS) {
+    const neighbor = locSum(mon.grid, dir);
+    if (chunkContains(chunk, neighbor) && squareHasMonster(chunk, neighbor)) {
+      adjacentMons++;
+    }
+  }
+
+  // Too crowded — don't breed (C: k >= 4 → skip)
+  if (adjacentMons >= 4) return false;
+
+  // Rate-limit: 0 adjacent = always, otherwise 1/(k * REPRO_RATE) chance
+  if (adjacentMons > 0 && rng.randint0(adjacentMons * REPRO_RATE) !== 0) {
+    return false;
+  }
 
   // Find an adjacent empty square
   const candidates: Loc[] = [];

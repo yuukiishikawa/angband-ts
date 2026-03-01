@@ -233,12 +233,14 @@ describe("monster/attack", () => {
   });
 
   describe("testHit", () => {
-    it("should always hit with very high toHit vs low AC", () => {
+    it("should almost always hit with very high toHit vs low AC", () => {
       let hits = 0;
       for (let i = 0; i < 200; i++) {
         if (testHit(1000, 1, rng)) hits++;
       }
-      expect(hits).toBe(200);
+      // C formula: 95% hit rate (12% auto-hit, 5% auto-miss, ~83% normal)
+      expect(hits).toBeGreaterThan(170);
+      expect(hits).toBeLessThanOrEqual(200);
     });
 
     it("should sometimes miss with low toHit vs high AC", () => {
@@ -246,9 +248,9 @@ describe("monster/attack", () => {
       for (let i = 0; i < 200; i++) {
         if (testHit(5, 200, rng)) hits++;
       }
-      // Should hit very rarely (mostly on the 5% auto-hit)
+      // C formula: 12% hit rate (only auto-hit, normal roll always fails)
       expect(hits).toBeLessThan(50);
-      expect(hits).toBeGreaterThan(0); // 5% auto-hit
+      expect(hits).toBeGreaterThan(0); // 12% auto-hit
     });
   });
 

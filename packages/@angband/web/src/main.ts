@@ -29,10 +29,10 @@ import {
 } from "@angband/core/data/object-loader.js";
 import type { MonsterRace } from "@angband/core/types/monster.js";
 import type { ObjectKind, ObjectType, Artifact, EgoItem, Brand, Slay } from "@angband/core/types/object.js";
-import type { Player, StartItem } from "@angband/core/types/player.js";
-import { BitFlag } from "@angband/core/z/bitflag.js";
+import type { Player } from "@angband/core/types/player.js";
 import { createStore, initStoreStock, StoreType, STORE_TYPE_MAX } from "@angband/core/store/store.js";
 import type { Store } from "@angband/core/store/store.js";
+import { initializeNewPlayer } from "@angband/core/game/bootstrap.js";
 
 import { KeyboardInputProvider } from "./keyboard-input.js";
 import { GameBridge } from "./game-bridge.js";
@@ -108,113 +108,6 @@ function tryLoadSavedGame(
   } catch (err: unknown) {
     console.warn("Failed to load saved game:", err);
     return null;
-  }
-}
-
-// ── Starting equipment ──
-
-/** TVAL name → TVal enum value mapping for resolving start-items. */
-const TVAL_NAME_MAP: Record<string, number> = {
-  chest: 1, shot: 2, arrow: 3, bolt: 4,
-  bow: 5, digger: 6, hafted: 7, polearm: 8, sword: 9,
-  boots: 10, gloves: 11, helm: 12, crown: 13,
-  shield: 14, cloak: 15,
-  "soft armor": 16, "soft armour": 16,
-  "hard armor": 17, "hard armour": 17,
-  "dragon armor": 18,
-  light: 19, amulet: 20, ring: 21,
-  staff: 22, wand: 23, rod: 24,
-  scroll: 25, potion: 26, flask: 27,
-  food: 28, mushroom: 29,
-  "magic book": 30, "prayer book": 31,
-  "nature book": 32, "shadow book": 33,
-};
-
-/**
- * Find an ObjectKind matching a StartItem's tvalName and svalName.
- */
-function findStartItemKind(
-  item: StartItem,
-  kinds: readonly ObjectKind[],
-): ObjectKind | null {
-  if (!item.tvalName || !item.svalName) return null;
-  const tval = TVAL_NAME_MAP[item.tvalName];
-  if (tval === undefined) return null;
-
-  // Match by tval and name (case-insensitive, bracket-stripped)
-  const svalLower = item.svalName.replace(/^\[|\]$/g, "").toLowerCase();
-  return kinds.find((k) =>
-    k.tval === tval && k.name.toLowerCase() === svalLower,
-  ) ?? null;
-}
-
-/**
- * Create an ObjectType from an ObjectKind for starting inventory.
- */
-function createStartObject(kind: ObjectKind, quantity: number): ObjectType {
-  return {
-    kind,
-    ego: null,
-    artifact: null,
-    prev: null,
-    next: null,
-    known: null,
-    oidx: 0 as never,
-    grid: { x: 0, y: 0 },
-    tval: kind.tval,
-    sval: kind.sval,
-    pval: 0,
-    weight: kind.weight,
-    dd: kind.dd,
-    ds: kind.ds,
-    ac: kind.ac,
-    toA: 0,
-    toH: 0,
-    toD: 0,
-    flags: new BitFlag(39),
-    modifiers: new Array(16).fill(0),
-    elInfo: [],
-    brands: null,
-    slays: null,
-    curses: null,
-    effect: kind.effect,
-    effectMsg: kind.effectMsg,
-    activation: kind.activation,
-    time: kind.time,
-    timeout: 0,
-    number: quantity,
-    notice: 0,
-    heldMIdx: 0,
-    mimickingMIdx: 0,
-    origin: 0 as never,
-    originDepth: 0,
-    originRace: null,
-    note: 0,
-  } as ObjectType;
-}
-
-/**
- * Give a player their class starting items.
- */
-function giveStartingItems(
-  player: Player,
-  kinds: readonly ObjectKind[],
-  rng: { randint0(n: number): number },
-): void {
-  const pGear = player as Player & { inventory: ObjectType[] };
-  if (!pGear.inventory) pGear.inventory = [];
-
-  for (const item of player.class.startItems) {
-    const kind = findStartItemKind(item, kinds);
-    if (!kind) continue;
-
-    const quantity = item.min + (item.max > item.min
-      ? rng.randint0(item.max - item.min + 1)
-      : 0);
-    if (quantity <= 0) continue;
-
-    const obj = createStartObject(kind, quantity);
-    pGear.inventory.push(obj);
   }
 }
 
@@ -303,7 +196,7 @@ async function main(): Promise<void> {
         if (!state.stores || state.stores.length === 0) {
           const stores: Store[] = [];
           for (let i = 0; i < STORE_TYPE_MAX; i++) {
-            const store = createStore(i as unknown as typeof StoreType.GENERAL);
+            const store = createStore(i as StoreType);
             initStoreStock(store, 0, gameData.objectKinds, rng);
             stores.push(store);
           }
@@ -347,8 +240,8 @@ async function newGame(
 
   const player = createPlayer(birth.name, birth.race, birth.class, rng);
 
-  // Give starting equipment from class definition
-  giveStartingItems(player, gameData.objectKinds, rng);
+  // Give starting items, auto-equip gear, calculate derived stats
+  initializeNewPlayer(player, gameData.objectKinds, rng);
 
   // Start in the town (depth 0)
   const startDepth = 0;
@@ -363,7 +256,7 @@ async function newGame(
   // Initialize town stores
   const stores: Store[] = [];
   for (let i = 0; i < STORE_TYPE_MAX; i++) {
-    const store = createStore(i as unknown as typeof StoreType.GENERAL);
+    const store = createStore(i as StoreType);
     initStoreStock(store, 0, gameData.objectKinds, rng);
     stores.push(store);
   }

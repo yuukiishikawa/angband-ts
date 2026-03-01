@@ -160,15 +160,31 @@ const EFFECT_META: Partial<Record<BlowEffect, BlowEffectMeta>> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Simulate a to-hit test (equivalent to C test_hit).
- * Returns true if the attacker hits.
+ * Simulate a to-hit test (equivalent to C test_hit / hit_chance).
+ * Uses the same formula as C Angband:
+ *   - Always hit 12% of the time
+ *   - Always miss 5% of the time
+ *   - Floor of 9 on to_hit
+ *   - Hit if roll >= AC * 2/3
  */
 export function testHit(toHit: number, ac: number, rng: RNG): boolean {
-  // Automatic hit
-  if (rng.randint0(100) < 5) return true;
+  const HUNDRED_PCT = 10000;
+  const ALWAYS_HIT = 1200;
+  const ALWAYS_MISS = 500;
 
-  // Percentile roll against effective score
-  return rng.randint1(toHit) >= Math.floor(ac * 3 / 4);
+  // Floor on to_hit
+  const effectiveToHit = Math.max(9, toHit);
+
+  // Calculate base hit percentage (scaled to 10000)
+  const baseChance = Math.max(0, effectiveToHit - Math.floor(ac * 2 / 3));
+  const hitRate = Math.floor(HUNDRED_PCT * baseChance / effectiveToHit);
+
+  // Apply guaranteed hit/miss range
+  const numerator = Math.floor(
+    hitRate * (HUNDRED_PCT - ALWAYS_MISS - ALWAYS_HIT) / HUNDRED_PCT
+  ) + ALWAYS_HIT;
+
+  return rng.randint0(HUNDRED_PCT) < numerator;
 }
 
 /**

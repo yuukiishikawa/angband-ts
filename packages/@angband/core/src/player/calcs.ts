@@ -311,8 +311,22 @@ export function calcBonuses(player: Player): PlayerState {
     }
   }
 
-  // Number of blows (simplified — no weapon equipped at birth)
-  const numBlows = 100;
+  // Number of blows — calculate from weapon weight, STR, DEX, class
+  let numBlows = 100; // 1 blow if unarmed
+  const weaponItem = equipment?.[1] ?? null; // EquipSlot.WEAPON = 1
+  if (weaponItem && weaponItem.weight > 0) {
+    const wWeight = weaponItem.weight / 10;
+    const minWt = player.class.minWeight;
+    const div = wWeight < minWt ? minWt : wWeight;
+    let strIdx = Math.floor(
+      (adjStrBlow[Math.min(Math.max(statInd[Stat.STR]!, 0), STAT_RANGE - 1)]! * player.class.attMultiply) / div,
+    );
+    if (strIdx > 11) strIdx = 11;
+    const dexIdx = Math.min(adjDexBlow[Math.min(Math.max(statInd[Stat.DEX]!, 0), STAT_RANGE - 1)]!, 11);
+    const blowEnergy = blowsTable[strIdx]![dexIdx]!;
+    numBlows = Math.min(Math.floor(10000 / blowEnergy), 100 * player.class.maxAttacks);
+    if (numBlows < 100) numBlows = 100;
+  }
 
   // Collect flags from race and class
   const flags = player.race.flags.clone();

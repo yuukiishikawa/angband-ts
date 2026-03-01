@@ -285,7 +285,7 @@ export function placeNewMonster(
  */
 export function pickMonsterRace(
   depth: number,
-  races: MonsterRace[],
+  races: readonly MonsterRace[],
   rng: RNG,
 ): MonsterRace | null {
   // Occasional out-of-depth boost (1 in 25 chance)

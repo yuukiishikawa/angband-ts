@@ -28,7 +28,7 @@ import { incTimedEffect } from "../player/index.js";
 import { PY_FOOD_MAX } from "../player/index.js";
 import type { Effect } from "../types/index.js";
 import { EffectType } from "../effect/handler.js";
-import { Dice } from "../z/index.js";
+import { Dice, Aspect, randcalc } from "../z/index.js";
 
 import type { CommandResult } from "./magic.js";
 
@@ -440,16 +440,20 @@ function applyScrollEffect(
 ): void {
   if (eff.index === EffectType.TELEPORT) {
     // Phase Door / Teleport — move player to a random floor tile
-    const dist = eff.dice ? eff.dice.base : 10;
+    // Must use randcalc to properly evaluate dice including m_bonus.
+    // E.g. Teleportation scroll has dice "M60" → {base:0, m_bonus:60}
+    // Using just dice.base would give 0 (bug: teleport to same tile).
+    const dist = eff.dice
+      ? randcalc(rng, eff.dice, player.lev, Aspect.RANDOMISE)
+      : 10;
+    const actualDist = Math.max(dist, 2); // minimum distance of 2
     if (chunk) {
-      const newPos = findTeleportDest(player.grid, dist, chunk, rng);
+      const newPos = findTeleportDest(player.grid, actualDist, chunk, rng);
       if (newPos) {
-        // Clear player from old grid
-        const oldSq = chunk.squares[player.grid.y]?.[player.grid.x];
         // Move player
         player.grid = newPos;
         messages.push(dist <= 10 ? "You blink." : "You teleport away.");
-        console.error(`[SCROLL] TELEPORT dist=${dist} to (${newPos.x},${newPos.y})\n`);
+        console.error(`[SCROLL] TELEPORT dist=${actualDist} to (${newPos.x},${newPos.y})\n`);
       }
     }
   } else if (eff.index === EffectType.RECALL) {
@@ -485,10 +489,13 @@ function findTeleportDest(
   chunk: Chunk,
   rng: RNG,
 ): { x: number; y: number } | null {
-  // Try up to 100 random positions within range
-  for (let i = 0; i < 100; i++) {
+  const minDist = Math.max(1, Math.floor(maxDist / 5) + 1);
+  // Try up to 200 random positions within range
+  for (let i = 0; i < 200; i++) {
     const dx = rng.randint0(maxDist * 2 + 1) - maxDist;
     const dy = rng.randint0(maxDist * 2 + 1) - maxDist;
+    // Enforce minimum distance (matching C Angband behavior)
+    if (Math.abs(dx) + Math.abs(dy) < minDist) continue;
     const nx = from.x + dx;
     const ny = from.y + dy;
     if (nx < 1 || nx >= chunk.width - 1 || ny < 1 || ny >= chunk.height - 1) continue;

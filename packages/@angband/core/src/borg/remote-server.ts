@@ -41,13 +41,16 @@ import {
 } from "../data/object-loader.js";
 import type { ObjectKind, ObjectType } from "../types/object.js";
 import type { Player, PlayerRace, PlayerClass, ClassMagic, StartItem } from "../types/player.js";
-import { Stat } from "../types/player.js";
+import { Stat, TimedEffect } from "../types/player.js";
 import { createStore, initStoreStock, StoreType, STORE_TYPE_MAX } from "../store/store.js";
 import type { Store } from "../store/store.js";
 import type { GameCommand } from "../command/core.js";
 import { GameEventType } from "../game/event.js";
-import { EquipSlot } from "../types/player.js";
-import { equipItem } from "../object/gear.js";
+import {
+  giveStartingItems,
+  autoEquipStartingItems,
+  createStartObject,
+} from "../game/bootstrap.js";
 import { calcBonuses } from "../player/calcs.js";
 
 import { ScreenBuffer, ScreenRenderer, TERM_COLS, TERM_ROWS } from "./screen-renderer.js";
@@ -216,108 +219,7 @@ function classFromJSON(raw: ClassJSON, idx: number): PlayerClass {
   };
 }
 
-// ── Starting equipment ──
-
-const TVAL_NAME_MAP: Record<string, number> = {
-  chest: 1, shot: 2, arrow: 3, bolt: 4,
-  bow: 5, digger: 6, hafted: 7, polearm: 8, sword: 9,
-  boots: 10, gloves: 11, helm: 12, crown: 13,
-  shield: 14, cloak: 15,
-  "soft armor": 16, "soft armour": 16,
-  "hard armor": 17, "hard armour": 17,
-  "dragon armor": 18,
-  light: 19, amulet: 20, ring: 21,
-  staff: 22, wand: 23, rod: 24,
-  scroll: 25, potion: 26, flask: 27,
-  food: 28, mushroom: 29,
-  "magic book": 30, "prayer book": 31,
-  "nature book": 32, "shadow book": 33,
-};
-
-function findStartItemKind(
-  item: StartItem,
-  kinds: readonly ObjectKind[],
-): ObjectKind | null {
-  if (!item.tvalName || !item.svalName) return null;
-  const tval = TVAL_NAME_MAP[item.tvalName];
-  if (tval === undefined) return null;
-  const svalLower = item.svalName.replace(/^\[|\]$/g, "").toLowerCase();
-  // Strip Angband display modifiers (& prefix, ~ plural marker) for matching
-  const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
-  return kinds.find((k) => k.tval === tval && cleanName(k.name) === svalLower) ?? null;
-}
-
-function createStartObject(kind: ObjectKind, quantity: number): ObjectType {
-  // Set fuel for light sources (BURNS_OUT → 5000, TAKES_FUEL → 15000)
-  const FUEL_TORCH = 5000;
-  const DEFAULT_LAMP = 15000;
-  let timeout = 0;
-  if (kind.tval === 19) { // tval 19 = light
-    if (kind.flags?.has?.(19)) { // ObjectFlag.BURNS_OUT = 19
-      timeout = FUEL_TORCH;
-    } else if (kind.flags?.has?.(20)) { // ObjectFlag.TAKES_FUEL = 20
-      timeout = DEFAULT_LAMP;
-    } else {
-      timeout = FUEL_TORCH; // Default for unrecognized lights
-    }
-  }
-
-  return {
-    kind,
-    ego: null,
-    artifact: null,
-    prev: null,
-    next: null,
-    known: null,
-    oidx: 0 as never,
-    grid: { x: 0, y: 0 },
-    tval: kind.tval,
-    sval: kind.sval,
-    pval: typeof kind.pval === "number" ? kind.pval : (kind.pval?.base ?? 0),
-    weight: kind.weight,
-    dd: kind.dd,
-    ds: kind.ds,
-    ac: kind.ac,
-    toA: 0,
-    toH: 0,
-    toD: 0,
-    flags: new BitFlag(39),
-    modifiers: new Array(16).fill(0) as number[],
-    elInfo: [],
-    brands: null,
-    slays: null,
-    curses: null,
-    effect: kind.effect,
-    effectMsg: kind.effectMsg,
-    activation: kind.activation,
-    time: kind.time,
-    timeout,
-    number: quantity,
-    notice: 0,
-    heldMIdx: 0,
-    mimickingMIdx: 0,
-    origin: 0 as never,
-    originDepth: 0,
-    originRace: null,
-    note: 0,
-  } as ObjectType;
-}
-
-function giveStartingItems(
-  player: Player,
-  kinds: readonly ObjectKind[],
-  rng: { randint0(n: number): number },
-): void {
-  const pGear = player as Player & { inventory: ObjectType[] };
-  if (!pGear.inventory) pGear.inventory = [];
-  for (const item of player.class.startItems) {
-    const kind = findStartItemKind(item, kinds);
-    if (!kind) continue;
-    const quantity = item.min + (item.max > item.min ? rng.randint0(item.max - item.min + 1) : 0);
-    if (quantity <= 0) continue;
-    pGear.inventory.push(createStartObject(kind, quantity));
-  }
-}
+// ── Borg-specific bonus items ──
 
 /**
  * Give bonus healing potions for borg testing.
@@ -331,21 +233,31 @@ function giveBonusItems(
   const pGear = player as Player & { inventory: ObjectType[] };
   if (!pGear.inventory) pGear.inventory = [];
 
-  // Items the borg normally buys from town stores
+  // Items the borg normally buys from town stores.
+  // C borg junk code now skips healing potions and Phase Door in remote mode,
+  // so these won't be wasted. Give enough for sustained dungeon exploration.
   const bonusItems: { tval: number; name: string; qty: number }[] = [
-    // Extra food (borg needs BI_FOOD >= 2 to descend)
-    { tval: 28, name: "Ration of Food", qty: 5 },
-    // Potions
-    { tval: 26, name: "Cure Light Wounds", qty: 99 },
-    { tval: 26, name: "Cure Serious Wounds", qty: 50 },
-    { tval: 26, name: "Cure Critical Wounds", qty: 25 },
-    { tval: 26, name: "Neutralize Poison", qty: 20 },
-    { tval: 26, name: "Speed", qty: 5 },
-    { tval: 26, name: "Heroism", qty: 10 },
-    // Scrolls
+    // Better weapon — Long Sword (2d5) replaces starting Dagger (1d4)
+    // Auto-equipped via autoEquipStartingItems()
+    { tval: 9, name: "Long Sword", qty: 1 },
+    // Better armor — Studded Leather Armour [12,+0] replaces Soft Leather [8,+0]
+    { tval: 16, name: "Studded Leather Armour", qty: 1 },
+    // Shield — Small Metal Shield [5,+0] for extra AC
+    { tval: 14, name: "Small Metal Shield", qty: 1 },
+    // Food (borg tracks BI_FOOD_HI for descent decisions)
+    { tval: 28, name: "Ration of Food", qty: 10 },
+    // Healing potions (protected from junking in remote mode)
+    { tval: 26, name: "Cure Light Wounds", qty: 20 },
+    { tval: 26, name: "Cure Serious Wounds", qty: 10 },
+    { tval: 26, name: "Cure Critical Wounds", qty: 10 },
+    // Escape scrolls (protected from junking in remote mode)
     { tval: 25, name: "Phase Door", qty: 15 },
+    // Teleport — critical for escape from dangerous situations
+    { tval: 25, name: "Teleportation", qty: 5 },
+    // Word of Recall — return to town (borg uses this heavily)
     { tval: 25, name: "Word of Recall", qty: 3 },
-    { tval: 25, name: "Remove Hunger", qty: 5 },
+    // Speed potions — important for deep combat
+    { tval: 26, name: "Speed", qty: 5 },
   ];
 
   const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
@@ -359,48 +271,6 @@ function giveBonusItems(
     } else {
       process.stderr.write(`[BonusItem] FAILED to find kind for "${bonus.name}" tval=${bonus.tval}\n`);
     }
-  }
-}
-
-/** Map tval to EquipSlot for auto-equipping starting items. */
-const TVAL_TO_EQUIP_SLOT: Record<number, EquipSlot> = {
-  6: EquipSlot.WEAPON,   // digger
-  7: EquipSlot.WEAPON,   // hafted
-  8: EquipSlot.WEAPON,   // polearm
-  9: EquipSlot.WEAPON,   // sword
-  5: EquipSlot.BOW,      // bow
-  10: EquipSlot.BOOTS,   // boots
-  11: EquipSlot.GLOVES,  // gloves
-  12: EquipSlot.HAT,     // helm
-  13: EquipSlot.HAT,     // crown
-  14: EquipSlot.SHIELD,  // shield
-  15: EquipSlot.CLOAK,   // cloak
-  16: EquipSlot.BODY_ARMOR, // soft armour
-  17: EquipSlot.BODY_ARMOR, // hard armour
-  18: EquipSlot.BODY_ARMOR, // dragon armor
-  19: EquipSlot.LIGHT,   // light
-  20: EquipSlot.AMULET,  // amulet
-  21: EquipSlot.RING,    // ring
-};
-
-function autoEquipStartingItems(player: Player): void {
-  const pGear = player as Player & { inventory: ObjectType[] };
-  if (!pGear.inventory) return;
-
-  const toRemove: number[] = [];
-  for (let i = 0; i < pGear.inventory.length; i++) {
-    const item = pGear.inventory[i]!;
-    const slot = TVAL_TO_EQUIP_SLOT[item.tval];
-    if (slot !== undefined) {
-      const result = equipItem(player, item, slot);
-      if (result.success) {
-        toRemove.push(i);
-      }
-    }
-  }
-  // Remove equipped items from inventory (reverse order to keep indices valid)
-  for (let i = toRemove.length - 1; i >= 0; i--) {
-    pGear.inventory.splice(toRemove[i]!, 1);
   }
 }
 
@@ -468,7 +338,7 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
   const speed = p.state.speed;
   const dead = state.dead ? 1 : 0;
   lines.push(
-    `STAT hp=${p.chp} mhp=${p.mhp} sp=${p.csp} msp=${p.msp} lev=${p.lev} depth=${state.depth} speed=${speed} dead=${dead}`
+    `STAT hp=${p.chp} mhp=${p.mhp} sp=${p.csp} msp=${p.msp} lev=${p.lev} depth=${state.depth} speed=${speed} dead=${dead} food=${p.timed[TimedEffect.FOOD]} blind=${p.timed[TimedEffect.BLIND]} confused=${p.timed[TimedEffect.CONFUSED]} poisoned=${p.timed[TimedEffect.POISONED]} cut=${p.timed[TimedEffect.CUT]} stun=${p.timed[TimedEffect.STUN]} afraid=${p.timed[TimedEffect.AFRAID]} paralyzed=${p.timed[TimedEffect.PARALYZED]} fast=${p.timed[TimedEffect.FAST]} slow=${p.timed[TimedEffect.SLOW]} image=${p.timed[TimedEffect.IMAGE]}`
   );
   lines.push(
     `STAT str=${p.statCur[Stat.STR]} int=${p.statCur[Stat.INT]} wis=${p.statCur[Stat.WIS]} dex=${p.statCur[Stat.DEX]} con=${p.statCur[Stat.CON]}`
@@ -510,12 +380,30 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
     }
   }
 
-  // Equipment (slots 23..34, matching C INVEN_WIELD=23 etc.)
+  // Equipment (slots 23..34, matching C body.txt order)
+  // TS equipment[] is indexed by EquipSlot enum (NONE=0, WEAPON=1, BOW=2, RING=3, ...)
+  // C body.txt order: WEAPON=0, BOW=1, RING(right)=2, RING(left)=3, AMULET=4, ...
+  // Must map TS enum index → C body index, then add pack_size (23).
+  const EQUIP_SLOT_TO_C_BODY: Record<number, number> = {
+    1: 0,   // WEAPON → body[0]
+    2: 1,   // BOW → body[1]
+    3: 2,   // RING → body[2] (right hand)
+    4: 4,   // AMULET → body[4] (skip body[3] = left ring)
+    5: 5,   // LIGHT → body[5]
+    6: 6,   // BODY_ARMOR → body[6]
+    7: 7,   // CLOAK → body[7]
+    8: 8,   // SHIELD → body[8]
+    9: 9,   // HAT → body[9]
+    10: 10, // GLOVES → body[10]
+    11: 11, // BOOTS → body[11]
+  };
   if (pGear.equipment) {
     for (let slot = 0; slot < pGear.equipment.length; slot++) {
       const item = pGear.equipment[slot];
       if (!item || !item.kind) continue;
-      const cSlot = 23 + slot; // INVEN_WIELD = pack_size = 23
+      const bodyIdx = EQUIP_SLOT_TO_C_BODY[slot];
+      if (bodyIdx === undefined) continue; // skip NONE=0
+      const cSlot = 23 + bodyIdx; // pack_size=23, INVEN_WIELD=23+0
       const name = item.kind.name.replace(/ /g, "_");
       const pval = typeof item.pval === "number" ? item.pval : 0;
       lines.push(`INVEN ${cSlot} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${name}`);
@@ -553,6 +441,9 @@ export class RemoteBorgServer {
   private pendingCommands: GameCommand[] = [];
   private server: net.Server | null = null;
   private client: net.Socket | null = null;
+  private prevDepth: number = -999;
+  private objectKinds: readonly ObjectKind[] = [];
+  private framesSinceResupply: number = 0;
 
   constructor(
     private port: number,
@@ -614,6 +505,7 @@ export class RemoteBorgServer {
     const player = createPlayer("Borg", race, cls, rng);
     giveStartingItems(player, objectKinds, rng);
     giveBonusItems(player, objectKinds);
+    this.objectKinds = objectKinds;
     autoEquipStartingItems(player);
     player.state = calcBonuses(player);
 
@@ -821,9 +713,70 @@ export class RemoteBorgServer {
    */
   private sendScreenFrame(): void {
     if (!this.client || !this.state) return;
+    // Replenish healing potions:
+    // 1) On descent to a new dungeon level (simulates town resupply)
+    // 2) Every 200 frames at any depth (prevents potion exhaustion)
+    const curDepth = this.state.depth;
+    if (curDepth > this.prevDepth && curDepth > 0) {
+      this.replenishSupplies();
+      process.stderr.write(`[RESUPPLY] depth ${this.prevDepth} → ${curDepth}\n`);
+      this.framesSinceResupply = 0;
+    }
+    this.prevDepth = curDepth;
+    this.framesSinceResupply++;
+    if (this.framesSinceResupply >= 200 && curDepth > 0) {
+      this.replenishSupplies();
+      process.stderr.write(`[RESUPPLY] periodic (every 200 frames)\n`);
+      this.framesSinceResupply = 0;
+    }
+
     this.renderer.render(this.state);
     const frame = serializeFrame(this.screen, this.state, this.renderer);
     this.sendLine(frame);
+  }
+
+  /**
+   * Replenish healing potions and Phase Door scrolls when descending.
+   * Simulates town resupply for remote mode.
+   */
+  private replenishSupplies(): void {
+    if (!this.state) return;
+    const p = this.state.player as Player & { inventory?: ObjectType[] };
+    if (!p.inventory) return;
+
+    const targets: { tval: number; name: string; targetQty: number }[] = [
+      { tval: 26, name: "Cure Light Wounds", targetQty: 20 },
+      { tval: 26, name: "Cure Serious Wounds", targetQty: 10 },
+      { tval: 26, name: "Cure Critical Wounds", targetQty: 10 },
+      { tval: 25, name: "Phase Door", targetQty: 10 },
+      { tval: 25, name: "Teleportation", targetQty: 5 },
+      { tval: 25, name: "Word of Recall", targetQty: 3 },
+      { tval: 26, name: "Speed", targetQty: 5 },
+    ];
+
+    const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
+    for (const target of targets) {
+      // Find existing stack in inventory
+      const existing = p.inventory.find(
+        (item) => item.tval === target.tval && item.kind && cleanName(item.kind.name) === target.name.toLowerCase(),
+      );
+      if (existing) {
+        if (existing.number < target.targetQty) {
+          const added = target.targetQty - existing.number;
+          existing.number = target.targetQty;
+          process.stderr.write(`[RESUPPLY] ${target.name}: ${existing.number - added} → ${existing.number}\n`);
+        }
+      } else {
+        // Create new stack
+        const kind = this.objectKinds.find(
+          (k) => k.tval === target.tval && cleanName(k.name) === target.name.toLowerCase(),
+        );
+        if (kind) {
+          p.inventory.push(createStartObject(kind, target.targetQty));
+          process.stderr.write(`[RESUPPLY] ${target.name}: new stack of ${target.targetQty}\n`);
+        }
+      }
+    }
   }
 
   private sendLine(data: string): void {

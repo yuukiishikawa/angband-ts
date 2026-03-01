@@ -18,6 +18,7 @@ import { MonsterRaceFlag } from "../types/monster.js";
 import { Stat, TimedEffect } from "../types/player.js";
 import { PY_FOOD_WEAK } from "../player/timed.js";
 import { TVal } from "../types/object.js";
+import type { ObjectType } from "../types/object.js";
 import type { GameState } from "./state.js";
 import { addMessage, MessageType } from "./state.js";
 import { GameEventType } from "./event.js";
@@ -432,53 +433,42 @@ export function processMonsters(
     // Process turns while the monster has enough energy
     // minEnergy filter: skip monsters below the threshold (fast-monster phase)
     while (mon.energy >= MOVE_ENERGY && mon.energy >= minEnergy) {
-      const action = monsterTakeTurn(chunk, mon, playerLoc, rng);
+      // Try to multiply FIRST — this uses the turn (C: monster_turn_multiply)
+      let didMultiply = false;
+      if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
+        didMultiply = monsterMultiply(chunk, mon, rng);
+      }
 
-      switch (action.type) {
-        case "move":
-          monsterMove(chunk, mon, action.target);
-          break;
-        case "attack":
-          // Monster attacks the player — use full blow resolution
-          {
-            const blowResults = monsterAttackPlayer(mon, state.player, rng);
-            let totalDamage = 0;
-            for (const result of blowResults) {
-              if (result.hit) {
-                totalDamage += result.damage;
-                if (result.message) {
+      if (!didMultiply) {
+        // Normal action (move/attack/spell/idle)
+        const action = monsterTakeTurn(chunk, mon, playerLoc, rng);
+
+        switch (action.type) {
+          case "move":
+            monsterMove(chunk, mon, action.target);
+            break;
+          case "attack":
+            // Monster attacks the player — use full blow resolution
+            {
+              const blowResults = monsterAttackPlayer(mon, state.player, rng);
+              let totalDamage = 0;
+              for (const result of blowResults) {
+                if (result.hit) {
+                  totalDamage += result.damage;
+                  if (result.message) {
+                    addMessage(state, result.message, MessageType.COMBAT);
+                  }
+                  // Apply blow effect (status effects, theft, drain)
+                  const effectMsgs = applyBlowEffect(result.effect, state.player, result.damage, rng);
+                  for (const msg of effectMsgs) {
+                    addMessage(state, msg, MessageType.COMBAT);
+                  }
+                } else if (result.message) {
                   addMessage(state, result.message, MessageType.COMBAT);
                 }
-                // Apply blow effect (status effects, theft, drain)
-                const effectMsgs = applyBlowEffect(result.effect, state.player, result.damage, rng);
-                for (const msg of effectMsgs) {
-                  addMessage(state, msg, MessageType.COMBAT);
-                }
-              } else if (result.message) {
-                addMessage(state, result.message, MessageType.COMBAT);
               }
-            }
-            if (totalDamage > 0) {
-              state.player.chp -= totalDamage;
-              if (state.player.chp <= 0) {
-                state.player.chp = 0;
-                state.player.isDead = true;
-                state.dead = true;
-                state.player.diedFrom = mon.race.name;
-              }
-            }
-          }
-          break;
-        case "spell":
-          // Monster spell casting
-          {
-            const spell = monsterChooseSpell(mon, mon.race, rng);
-            if (spell !== null) {
-              const castResult = monsterCastSpell(mon, spell, playerLoc, rng);
-              addMessage(state, castResult.message, MessageType.COMBAT);
-              if (castResult.damage > 0) {
-                state.player.chp -= castResult.damage;
-                addMessage(state, `You take ${castResult.damage} damage.`, MessageType.COMBAT);
+              if (totalDamage > 0) {
+                state.player.chp -= totalDamage;
                 if (state.player.chp <= 0) {
                   state.player.chp = 0;
                   state.player.isDead = true;
@@ -487,16 +477,31 @@ export function processMonsters(
                 }
               }
             }
-          }
-          break;
-        case "idle":
-          // Do nothing
-          break;
-      }
-
-      // MULTIPLY monsters attempt to breed after acting
-      if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
-        monsterMultiply(chunk, mon, rng);
+            break;
+          case "spell":
+            // Monster spell casting
+            {
+              const spell = monsterChooseSpell(mon, mon.race, rng);
+              if (spell !== null) {
+                const castResult = monsterCastSpell(mon, spell, playerLoc, rng);
+                addMessage(state, castResult.message, MessageType.COMBAT);
+                if (castResult.damage > 0) {
+                  state.player.chp -= castResult.damage;
+                  addMessage(state, `You take ${castResult.damage} damage.`, MessageType.COMBAT);
+                  if (state.player.chp <= 0) {
+                    state.player.chp = 0;
+                    state.player.isDead = true;
+                    state.dead = true;
+                    state.player.diedFrom = mon.race.name;
+                  }
+                }
+              }
+            }
+            break;
+          case "idle":
+            // Do nothing
+            break;
+        }
       }
 
       mon.energy -= MOVE_ENERGY;
@@ -589,10 +594,9 @@ export function processWorld(state: GameState): void {
     }
   }
 
-  // Monster natural spawning — every (depth*2+10) turns
-  // C: process_world() calls pick_and_place_monster() roughly every MIN_M_ALLOC_TD turns
-  const spawnInterval = Math.max(10, state.depth * 2 + 10);
-  if (state.turn % spawnInterval === 0 && state.depth > 0) {
+  // Monster natural spawning — C uses one_in_(500) per turn (constants.txt mon-gen:chance:500)
+  // We use the same 1-in-500 random chance per turn
+  if (state.depth > 0 && state.rng.oneIn(500)) {
     const race = pickMonsterRace(state.depth, state.monsterRaces, state.rng);
     if (race) {
       // Spawn away from the player (spread=20, at least 10 squares away)
@@ -693,7 +697,11 @@ export async function processPlayer(
     if (state.player.energy < MOVE_ENERGY && rep < nrepeat - 1) break;
   }
 
-  if (!usedEnergy) {
+  // Recalculate derived stats after any action (equipment, buffs, etc.)
+  // Port of the calc_bonuses() call in C process_player().
+  if (usedEnergy) {
+    state.player.state = calcBonuses(state.player);
+  } else {
     state.player.upkeep.energyUse = 0;
   }
   return usedEnergy;

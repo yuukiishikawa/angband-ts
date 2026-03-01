@@ -478,27 +478,26 @@ export function cmdTunnel(
     return successResult(STANDARD_ENERGY, ["You see nothing there to tunnel."]);
   }
 
-  // Calculate digging chance based on player skill
+  // Calculate digging chance based on player skill.
+  // Port of calc_digging_chances() from player-calcs.c:1651.
   const diggingSkill = player.state.skills[9] ?? 0; // SKILL_DIGGING
   const isRubble = squareIsFeat(chunk, target, Feat.RUBBLE);
 
-  // Difficulty: rubble < magma < quartz < granite
-  let difficulty: number;
+  let chance: number;
   if (isRubble) {
-    difficulty = 200;
+    chance = diggingSkill * 8;
   } else if (featHasFlag(chunk, target, TerrainFlag.MAGMA)) {
-    difficulty = 600;
+    chance = (diggingSkill - 10) * 4;
   } else if (featHasFlag(chunk, target, TerrainFlag.QUARTZ)) {
-    difficulty = 900;
+    chance = (diggingSkill - 20) * 2;
   } else if (featHasFlag(chunk, target, TerrainFlag.GRANITE)) {
-    difficulty = 1200;
+    chance = (diggingSkill - 40) * 1;
   } else {
-    // Closed door
-    difficulty = 400;
+    // Closed door: (skill * 4 - 119) / 3
+    chance = Math.floor((diggingSkill * 4 - 119) / 3);
   }
+  chance = Math.max(0, chance);
 
-  // Attempt to dig
-  const chance = Math.max(0, diggingSkill * 10 - difficulty);
   const success = chance > rng.randint0(1600);
 
   if (success) {
