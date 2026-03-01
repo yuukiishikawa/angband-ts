@@ -989,8 +989,8 @@ export function parseObjectKinds(
     const base = bases.get(typeName) ?? null;
     const tval = TVAL_MAP[typeName] ?? TVal.NULL;
 
-    // Track sval per tval
-    const sval = (svalCounters.get(tval) ?? 0) as SVal;
+    // Track sval per tval (1-based, matching C Angband's obj-init.c:146)
+    const sval = (svalCounters.get(tval) ?? 1) as SVal;
     svalCounters.set(tval, sval + 1);
 
     // Parse graphics

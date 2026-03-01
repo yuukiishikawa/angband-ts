@@ -807,7 +807,7 @@ export function effectMassBanish(ctx: EffectContext, _dice?: Dice): EffectResult
   let banished = 0;
 
   for (const mon of chunk.monsters) {
-    if (mon.hp <= 0) continue;
+    if (!mon || mon.hp <= 0) continue;
     const dx = mon.grid.x - player.grid.x;
     const dy = mon.grid.y - player.grid.y;
     if (dx * dx + dy * dy <= radius * radius) {
@@ -831,7 +831,7 @@ export function effectMassBanish(ctx: EffectContext, _dice?: Dice): EffectResult
 export function effectProbe(ctx: EffectContext, _dice?: Dice): EffectResult {
   const messages: string[] = [];
   for (const mon of ctx.chunk.monsters) {
-    if (mon.hp <= 0) continue;
+    if (!mon || mon.hp <= 0) continue;
     messages.push(`${mon.race.name}: HP ${mon.hp}/${mon.maxhp}, AC ${mon.race.ac}, Speed ${mon.mspeed}`);
   }
   if (messages.length === 0) messages.push("No monsters to probe.");
@@ -846,7 +846,7 @@ export function effectProbe(ctx: EffectContext, _dice?: Dice): EffectResult {
 export function effectWake(ctx: EffectContext, _dice?: Dice): EffectResult {
   let woke = 0;
   for (const mon of ctx.chunk.monsters) {
-    if (mon.hp <= 0) continue;
+    if (!mon || mon.hp <= 0) continue;
     if ((mon.mTimed[0] ?? 0) > 0) {  // SLEEP = 0
       mon.mTimed[0] = 0;
       woke++;
@@ -893,7 +893,7 @@ export function effectSleep(ctx: EffectContext, dice?: Dice): EffectResult {
   const power = calculateValue(ctx.rng, dice, ctx.boost);
   let slept = 0;
   for (const mon of ctx.chunk.monsters) {
-    if (mon.hp <= 0) continue;
+    if (!mon || mon.hp <= 0) continue;
     const dx = mon.grid.x - ctx.player.grid.x;
     const dy = mon.grid.y - ctx.player.grid.y;
     if (Math.max(Math.abs(dx), Math.abs(dy)) <= 20) {

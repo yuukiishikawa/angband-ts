@@ -18,6 +18,7 @@ import { loc, locSum } from "../z/index.js";
 import { chunkContains, chunkGetSquare, squareSetFeat, getFeatureInfo } from "../cave/index.js";
 import { STANDARD_ENERGY, successResult, failResult } from "./core.js";
 import type { CommandResult } from "./core.js";
+import { addToInventory, inventoryIsFull } from "../object/index.js";
 import { cmdAttack as cmdAttackFn } from "./combat.js";
 
 // ── Direction handling ──
@@ -213,6 +214,8 @@ export function cmdWalk(
   // Not passable -> blocked
   if (!isPassable(chunk, target)) {
     if (isWall(chunk, target)) {
+      const sq = chunkGetSquare(chunk, target);
+      process.stderr.write(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
       return failResult(["There is a wall in the way!"]);
     }
     if (isRock(chunk, target)) {
@@ -229,6 +232,28 @@ export function cmdWalk(
   const sq = chunkGetSquare(chunk, target);
   if (sq.trap !== null && sq.info.has(SquareFlag.TRAP)) {
     messages.push("You discover a trap!");
+  }
+
+  // Auto-pickup: pick up floor objects when walking onto them
+  if (sq.obj !== null && !inventoryIsFull(player)) {
+    const obj = chunk.objectList.get(sq.obj as number);
+    if (obj && obj.kind) {
+      chunk.objectList.delete(sq.obj as number);
+      const nextObj = obj.next;
+      if (nextObj) {
+        for (const [id, o] of chunk.objectList) {
+          if (o === nextObj) {
+            (sq as { obj: number | null }).obj = id;
+            break;
+          }
+        }
+      } else {
+        (sq as { obj: number | null }).obj = null;
+      }
+      addToInventory(player, obj);
+      messages.push(`You pick up ${obj.kind.name}.`);
+      process.stderr.write(`[PICKUP] ${obj.kind.name} tval=${obj.tval} sval=${obj.sval}\n`);
+    }
   }
 
   return successResult(STANDARD_ENERGY, messages);
@@ -443,14 +468,14 @@ export function cmdTunnel(
     return failResult(["There is a monster in the way!"]);
   }
 
-  // Permanent wall
+  // Permanent wall — still uses a turn (C game calls use_energy first)
   if (isPermanent(chunk, target)) {
-    return failResult(["This seems to be permanent rock."]);
+    return successResult(STANDARD_ENERGY, ["This seems to be permanent rock."]);
   }
 
   // Must be diggable (wall or rock or closed door)
   if (!isWall(chunk, target) && !isRock(chunk, target) && !isClosedDoor(chunk, target)) {
-    return failResult(["You see nothing there to tunnel."]);
+    return successResult(STANDARD_ENERGY, ["You see nothing there to tunnel."]);
   }
 
   // Calculate digging chance based on player skill
@@ -673,6 +698,7 @@ export function cmdGoUp(
   }
 
   // Go up one level
+  process.stderr.write(`[STAIRS-UP] depth ${player.depth} → ${player.depth - 1}\n`);
   player.depth -= 1;
   player.upkeep.createUpStair = false;
   player.upkeep.createDownStair = true;

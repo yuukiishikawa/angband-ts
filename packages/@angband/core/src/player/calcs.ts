@@ -12,7 +12,7 @@
  * under the terms of either GPL-2.0 or the Angband licence.
  */
 
-import type { Player, PlayerState } from "../types/index.js";
+import type { Player, PlayerState, ObjectType } from "../types/index.js";
 import {
   Stat,
   STAT_MAX,
@@ -21,6 +21,10 @@ import {
   SKILL_MAX,
 } from "../types/index.js";
 import { BitFlag } from "../z/index.js";
+
+/** ObjectFlag values for light sources */
+const OF_LIGHT_2 = 30;
+const OF_LIGHT_3 = 31;
 
 // ── Stat tables (from C player-calcs.c) ──
 
@@ -240,7 +244,8 @@ export function calcBonuses(player: Player): PlayerState {
   let toA = 0;
   let toH = 0;
   let toD = 0;
-  const ac = 0;
+  let ac = 0;
+  let curLight = 0;
 
   // Base skills from race + class
   for (let i = 0; i < SKILL_MAX; i++) {
@@ -285,6 +290,27 @@ export function calcBonuses(player: Player): PlayerState {
   // Infravision from race
   const seeInfra = player.race.infra;
 
+  // Equipment bonuses (AC, combat, light radius)
+  const equipment = (player as Player & { equipment?: (ObjectType | null)[] }).equipment;
+  if (equipment) {
+    for (let slot = 0; slot < equipment.length; slot++) {
+      const item = equipment[slot];
+      if (!item) continue;
+
+      ac += item.ac ?? 0;
+      toA += item.toA ?? 0;
+      toH += item.toH ?? 0;
+      toD += item.toD ?? 0;
+
+      // Light radius from light sources with fuel
+      if (item.tval === 19 && item.timeout > 0) {
+        if (item.kind?.flags?.has?.(OF_LIGHT_2)) curLight += 2;
+        else if (item.kind?.flags?.has?.(OF_LIGHT_3)) curLight += 3;
+        else curLight += 1;
+      }
+    }
+  }
+
   // Number of blows (simplified — no weapon equipped at birth)
   const numBlows = 100;
 
@@ -314,7 +340,7 @@ export function calcBonuses(player: Player): PlayerState {
     toH,
     toD,
     seeInfra,
-    curLight: 0,
+    curLight,
     heavyWield: false,
     heavyShoot: false,
     blessWield: false,

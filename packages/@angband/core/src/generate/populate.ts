@@ -122,7 +122,7 @@ export function populateMonsters(
 
     if (mon) {
       placed.push(mon);
-      chunk.monsters.push(mon);
+      // Note: placeMonsterOnGrid() already adds to chunk.monsters[midx]
     }
   }
 

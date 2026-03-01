@@ -90,6 +90,7 @@ interface ClassJSON {
   magic?: string;
   "player-flags"?: string;
   "start-items"?: string[];
+  equip?: string[];
   "skill-disarm-phys": string;
   "skill-disarm-magic": string;
   "skill-device": string;
@@ -210,7 +211,7 @@ function classFromJSON(raw: ClassJSON, idx: number): PlayerClass {
     maxAttacks: Number(raw["max-attacks"]),
     minWeight: Number(raw["min-weight"]),
     attMultiply: Number(raw["strength-multiplier"]),
-    startItems: parseStartItems(raw["start-items"]),
+    startItems: parseStartItems(raw.equip ?? raw["start-items"]),
     magic,
   };
 }
@@ -241,10 +242,26 @@ function findStartItemKind(
   const tval = TVAL_NAME_MAP[item.tvalName];
   if (tval === undefined) return null;
   const svalLower = item.svalName.replace(/^\[|\]$/g, "").toLowerCase();
-  return kinds.find((k) => k.tval === tval && k.name.toLowerCase() === svalLower) ?? null;
+  // Strip Angband display modifiers (& prefix, ~ plural marker) for matching
+  const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
+  return kinds.find((k) => k.tval === tval && cleanName(k.name) === svalLower) ?? null;
 }
 
 function createStartObject(kind: ObjectKind, quantity: number): ObjectType {
+  // Set fuel for light sources (BURNS_OUT → 5000, TAKES_FUEL → 15000)
+  const FUEL_TORCH = 5000;
+  const DEFAULT_LAMP = 15000;
+  let timeout = 0;
+  if (kind.tval === 19) { // tval 19 = light
+    if (kind.flags?.has?.(19)) { // ObjectFlag.BURNS_OUT = 19
+      timeout = FUEL_TORCH;
+    } else if (kind.flags?.has?.(20)) { // ObjectFlag.TAKES_FUEL = 20
+      timeout = DEFAULT_LAMP;
+    } else {
+      timeout = FUEL_TORCH; // Default for unrecognized lights
+    }
+  }
+
   return {
     kind,
     ego: null,
@@ -256,7 +273,7 @@ function createStartObject(kind: ObjectKind, quantity: number): ObjectType {
     grid: { x: 0, y: 0 },
     tval: kind.tval,
     sval: kind.sval,
-    pval: 0,
+    pval: typeof kind.pval === "number" ? kind.pval : (kind.pval?.base ?? 0),
     weight: kind.weight,
     dd: kind.dd,
     ds: kind.ds,
@@ -274,7 +291,7 @@ function createStartObject(kind: ObjectKind, quantity: number): ObjectType {
     effectMsg: kind.effectMsg,
     activation: kind.activation,
     time: kind.time,
-    timeout: 0,
+    timeout,
     number: quantity,
     notice: 0,
     heldMIdx: 0,
@@ -307,26 +324,40 @@ function giveStartingItems(
  * The C borg normally buys these from town stores, but the TS remote server
  * doesn't support store interaction. Give potions to enable deeper exploration.
  */
-function giveBonusPotions(
+function giveBonusItems(
   player: Player,
   kinds: readonly ObjectKind[],
 ): void {
   const pGear = player as Player & { inventory: ObjectType[] };
   if (!pGear.inventory) pGear.inventory = [];
 
-  const POTION_TVAL = 26; // TVal.POTION
-  const bonusItems = [
-    { name: "Cure Light Wounds", qty: 10 },
-    { name: "Cure Serious Wounds", qty: 5 },
-    { name: "Speed", qty: 2 },
+  // Items the borg normally buys from town stores
+  const bonusItems: { tval: number; name: string; qty: number }[] = [
+    // Extra food (borg needs BI_FOOD >= 2 to descend)
+    { tval: 28, name: "Ration of Food", qty: 5 },
+    // Potions
+    { tval: 26, name: "Cure Light Wounds", qty: 99 },
+    { tval: 26, name: "Cure Serious Wounds", qty: 50 },
+    { tval: 26, name: "Cure Critical Wounds", qty: 25 },
+    { tval: 26, name: "Neutralize Poison", qty: 20 },
+    { tval: 26, name: "Speed", qty: 5 },
+    { tval: 26, name: "Heroism", qty: 10 },
+    // Scrolls
+    { tval: 25, name: "Phase Door", qty: 15 },
+    { tval: 25, name: "Word of Recall", qty: 3 },
+    { tval: 25, name: "Remove Hunger", qty: 5 },
   ];
 
+  const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
   for (const bonus of bonusItems) {
+    const bonusLower = bonus.name.toLowerCase();
     const kind = kinds.find(
-      (k) => k.tval === POTION_TVAL && k.name === bonus.name,
+      (k) => k.tval === bonus.tval && (k.name === bonus.name || cleanName(k.name) === bonusLower),
     );
     if (kind) {
       pGear.inventory.push(createStartObject(kind, bonus.qty));
+    } else {
+      process.stderr.write(`[BonusItem] FAILED to find kind for "${bonus.name}" tval=${bonus.tval}\n`);
     }
   }
 }
@@ -373,6 +404,7 @@ function autoEquipStartingItems(player: Player): void {
   }
 }
 
+
 function findStartPosition(
   chunk: { readonly width: number; readonly height: number; readonly squares: { feat: number }[][] },
 ): { x: number; y: number } {
@@ -413,6 +445,7 @@ function loadJSON(name: string): unknown[] {
  *   STAT str=<n> int=<n> wis=<n> dex=<n> con=<n>
  *   END
  */
+let _invenFrameCounter = 0;
 function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: ScreenRenderer): string {
   const lines: string[] = ["FRAME"];
 
@@ -446,16 +479,34 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
   );
 
   // Inventory and equipment for C borg's borg_items[]
-  // Format: INVEN <slot> <tval> <sval> <qty> <toH> <toD> <toA> <dd> <ds> <ac> <weight> <name>
+  // Format: INVEN <slot> <tval> <sval> <qty> <toH> <toD> <toA> <dd> <ds> <ac> <weight> <pval> <timeout> <name>
   const pGear = p as Player & { inventory?: ObjectType[]; equipment?: (ObjectType | null)[] };
 
   // Pack inventory (slots 0..22)
   if (pGear.inventory) {
     for (let i = 0; i < pGear.inventory.length && i < 23; i++) {
       const item = pGear.inventory[i]!;
-      if (!item.kind) continue;
+      if (!item) { if (_invenFrameCounter <= 2) process.stderr.write(`  [INVEN-SKIP] slot=${i} item=null\n`); continue; }
+      if (!item.kind) { if (_invenFrameCounter <= 2) process.stderr.write(`  [INVEN-SKIP] slot=${i} kind=null tval=${item.tval}\n`); continue; }
       const name = item.kind.name.replace(/ /g, "_");
-      lines.push(`INVEN ${i} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${name}`);
+      const pval = typeof item.pval === "number" ? item.pval : 0;
+      const line = `INVEN ${i} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${name}`;
+      if (_invenFrameCounter <= 2) process.stderr.write(`  [INVEN-SEND] ${line}\n`);
+      lines.push(line);
+    }
+  }
+  // Log inventory state for first few frames
+  {
+    _invenFrameCounter++;
+    const invenLen = pGear.inventory?.length ?? -1;
+    if (_invenFrameCounter <= 2) {
+      process.stderr.write(`[INVEN-FRAME] frame=${_invenFrameCounter} inven=${invenLen}\n`);
+      if (pGear.inventory) {
+        for (let i = 0; i < pGear.inventory.length; i++) {
+          const item = pGear.inventory[i];
+          process.stderr.write(`  [${i}] kind=${item?.kind?.name ?? 'NULL'} tval=${item?.tval} qty=${item?.number}\n`);
+        }
+      }
     }
   }
 
@@ -466,9 +517,25 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
       if (!item || !item.kind) continue;
       const cSlot = 23 + slot; // INVEN_WIELD = pack_size = 23
       const name = item.kind.name.replace(/ /g, "_");
-      lines.push(`INVEN ${cSlot} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${name}`);
+      const pval = typeof item.pval === "number" ? item.pval : 0;
+      lines.push(`INVEN ${cSlot} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${name}`);
     }
   }
+
+  // Stair positions for C borg's track_more/track_less
+  // The C borg in local mode reads the full cave; in remote mode it only
+  // sees the viewport. Sending stair positions lets it navigate properly.
+  const chunk = state.chunk;
+  let stairCount = 0;
+  for (let y = 0; y < chunk.height; y++) {
+    for (let x = 0; x < chunk.width; x++) {
+      const sq = chunk.squares[y]![x]!;
+      if (sq.feat === 6 /* FEAT_MORE */) { lines.push(`STAIR ${x} ${y} down`); stairCount++; }
+      else if (sq.feat === 5 /* FEAT_LESS */) { lines.push(`STAIR ${x} ${y} up`); stairCount++; }
+    }
+  }
+  // Always log first few frames for diagnostics
+  console.error(`[STAIR-SCAN] chunk=${chunk.width}x${chunk.height} depth=${state.player.depth} stairs=${stairCount}`);
 
   lines.push("END");
 
@@ -546,7 +613,7 @@ export class RemoteBorgServer {
 
     const player = createPlayer("Borg", race, cls, rng);
     giveStartingItems(player, objectKinds, rng);
-    giveBonusPotions(player, objectKinds);
+    giveBonusItems(player, objectKinds);
     autoEquipStartingItems(player);
     player.state = calcBonuses(player);
 

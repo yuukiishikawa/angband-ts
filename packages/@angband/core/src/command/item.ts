@@ -390,7 +390,8 @@ export function cmdQuaff(
 export function cmdRead(
   player: Player,
   itemIndex: number,
-  _rng: RNG,
+  rng: RNG,
+  chunk?: Chunk,
 ): CommandResult {
   const cantRead = checkCanRead(player);
   if (cantRead) return cantRead;
@@ -415,16 +416,91 @@ export function cmdRead(
   const messages: string[] = [];
   messages.push("You read the scroll.");
 
-  // The scroll's effect would be applied via effect_do() in the full game.
-  // Placeholder: apply the effect if one exists.
+  // Apply the scroll's effect chain
   if (obj.effect) {
-    messages.push("The scroll's magic takes effect.");
+    let eff: Effect | null = obj.effect;
+    while (eff) {
+      applyScrollEffect(eff, player, rng, messages, chunk);
+      eff = eff.next;
+    }
   }
 
   // Consume the scroll
   messages.push(...consumeItem(player, itemIndex, obj));
 
   return { success: true, energyCost: STANDARD_ENERGY, messages };
+}
+
+/**
+ * Apply a single scroll effect.
+ * Handles TELEPORT, NOURISH, TIMED_INC, RECALL, etc.
+ */
+function applyScrollEffect(
+  eff: Effect, player: Player, rng: RNG, messages: string[], chunk?: Chunk,
+): void {
+  if (eff.index === EffectType.TELEPORT) {
+    // Phase Door / Teleport — move player to a random floor tile
+    const dist = eff.dice ? eff.dice.base : 10;
+    if (chunk) {
+      const newPos = findTeleportDest(player.grid, dist, chunk, rng);
+      if (newPos) {
+        // Clear player from old grid
+        const oldSq = chunk.squares[player.grid.y]?.[player.grid.x];
+        // Move player
+        player.grid = newPos;
+        messages.push(dist <= 10 ? "You blink." : "You teleport away.");
+        process.stderr.write(`[SCROLL] TELEPORT dist=${dist} to (${newPos.x},${newPos.y})\n`);
+      }
+    }
+  } else if (eff.index === EffectType.RECALL) {
+    // Word of Recall — toggle recall flag
+    if (player.depth > 0) {
+      // In dungeon → recall to town
+      player.depth = 0;
+      player.upkeep.generateLevel = true;
+      messages.push("The air about you becomes charged...");
+      messages.push("You feel yourself yanked upwards!");
+      process.stderr.write(`[SCROLL] RECALL to town\n`);
+    } else {
+      // In town → recall to deepest level
+      const target = Math.max(1, player.recallDepth ?? 1);
+      player.depth = target;
+      player.upkeep.generateLevel = true;
+      messages.push("The air about you becomes charged...");
+      messages.push("You feel yourself yanked downwards!");
+      process.stderr.write(`[SCROLL] RECALL to depth=${target}\n`);
+    }
+  } else {
+    // Reuse potion effect handler for shared effects (NOURISH, TIMED_INC, etc.)
+    applyPotionEffect(eff, player, rng, messages);
+  }
+}
+
+/**
+ * Find a valid teleport destination within the given distance.
+ */
+function findTeleportDest(
+  from: { x: number; y: number },
+  maxDist: number,
+  chunk: Chunk,
+  rng: RNG,
+): { x: number; y: number } | null {
+  // Try up to 100 random positions within range
+  for (let i = 0; i < 100; i++) {
+    const dx = rng.randint0(maxDist * 2 + 1) - maxDist;
+    const dy = rng.randint0(maxDist * 2 + 1) - maxDist;
+    const nx = from.x + dx;
+    const ny = from.y + dy;
+    if (nx < 1 || nx >= chunk.width - 1 || ny < 1 || ny >= chunk.height - 1) continue;
+    const sq = chunk.squares[ny]?.[nx];
+    if (!sq) continue;
+    // Must be passable floor (Feat: 1=floor, 3=open, 4=broken, 5=less, 6=more)
+    if (sq.feat !== 1 && sq.feat !== 3 && sq.feat !== 4 && sq.feat !== 5 && sq.feat !== 6) continue;
+    // No monster on the tile
+    if (sq.mon > 0) continue;
+    return { x: nx, y: ny };
+  }
+  return null;
 }
 
 /**
@@ -724,13 +800,46 @@ export function cmdPickup(
     return { success: false, energyCost: 0, messages };
   }
 
-  // In the full game, we would iterate the floor pile at player.grid.
-  // This simplified version checks via the chunk's square data.
-  // The actual object retrieval requires the chunk object list which
-  // is beyond the current minimal type definitions.
-  // For now, return a "nothing here" message.
-  messages.push("There is nothing here to pick up.");
-  return { success: false, energyCost: 0, messages };
+  const sq = chunk.squares[player.grid.y]?.[player.grid.x];
+  if (!sq || sq.obj === null) {
+    return { success: false, energyCost: 0, messages };
+  }
+  process.stderr.write(`[PICKUP-TRY] at (${player.grid.x},${player.grid.y}) sq.obj=${sq.obj}\n`);
+
+  // Get the floor object from the chunk's object list
+  const obj = chunk.objectList.get(sq.obj as number);
+  if (!obj || !obj.kind) {
+    return { success: false, energyCost: 0, messages };
+  }
+
+  // Check if inventory is full
+  if (inventoryIsFull(player)) {
+    messages.push("Your pack is full!");
+    return { success: false, energyCost: 0, messages };
+  }
+
+  // Remove from floor
+  chunk.objectList.delete(sq.obj as number);
+  sq.obj = null;
+
+  // If there's a linked list of objects, promote the next one
+  if (obj.next) {
+    // Find the next object's id in the objectList
+    for (const [id, o] of chunk.objectList) {
+      if (o === obj.next) {
+        sq.obj = id as unknown as typeof sq.obj;
+        break;
+      }
+    }
+  }
+
+  // Add to inventory
+  addToInventory(player, obj);
+  const name = obj.kind.name;
+  messages.push(`You pick up ${name}.`);
+  process.stderr.write(`[PICKUP] ${name} tval=${obj.tval} sval=${obj.sval}\n`);
+
+  return { success: true, energyCost: STANDARD_ENERGY, messages };
 }
 
 /**
