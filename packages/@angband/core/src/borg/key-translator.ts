@@ -103,7 +103,7 @@ export class KeyTranslator {
       const itemSlot = ALL_LETTERS_NOHJKL.indexOf(ch);
       if (itemSlot >= 0) {
         const itemCmd = this.pending.command;
-        process.stderr.write(`[KEY] ${itemCmd} item letter='${ch}' slot=${itemSlot}\n`);
+        console.error(`[KEY] ${itemCmd} item letter='${ch}' slot=${itemSlot}\n`);
 
         // aim needs direction after item
         if (itemCmd === "aim") {

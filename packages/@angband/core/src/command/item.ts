@@ -56,7 +56,7 @@ function applyPotionEffect(eff: Effect, player: Player, rng: RNG, messages: stri
     }
     if (num > 0) {
       player.chp = Math.min(player.chp + num, player.mhp);
-      process.stderr.write(`[HEAL] +${num} hp, now ${player.chp}/${player.mhp}\n`);
+      console.error(`[HEAL] +${num} hp, now ${player.chp}/${player.mhp}\n`);
       if (num < 5) messages.push("You feel a little better.");
       else if (num < 15) messages.push("You feel better.");
       else if (num < 35) messages.push("You feel much better.");
@@ -346,14 +346,14 @@ export function cmdQuaff(
   }
 
   if (obj.tval !== TVal.POTION) {
-    process.stderr.write(`[QUAFF] Item at index ${itemIndex} is not a potion (tval=${obj.tval})\n`);
+    console.error(`[QUAFF] Item at index ${itemIndex} is not a potion (tval=${obj.tval})\n`);
     return {
       success: false,
       energyCost: 0,
       messages: ["You cannot quaff that!"],
     };
   }
-  process.stderr.write(`[QUAFF] Quaffing item at index ${itemIndex}: ${obj.kind?.name ?? 'unknown'} (tval=${obj.tval} effect=${obj.effect ? 'yes' : 'no'} pval=${obj.pval})\n`);
+  console.error(`[QUAFF] Quaffing item at index ${itemIndex}: ${obj.kind?.name ?? 'unknown'} (tval=${obj.tval} effect=${obj.effect ? 'yes' : 'no'} pval=${obj.pval})\n`);
 
   const messages: string[] = [];
   messages.push("You quaff the potion.");
@@ -449,7 +449,7 @@ function applyScrollEffect(
         // Move player
         player.grid = newPos;
         messages.push(dist <= 10 ? "You blink." : "You teleport away.");
-        process.stderr.write(`[SCROLL] TELEPORT dist=${dist} to (${newPos.x},${newPos.y})\n`);
+        console.error(`[SCROLL] TELEPORT dist=${dist} to (${newPos.x},${newPos.y})\n`);
       }
     }
   } else if (eff.index === EffectType.RECALL) {
@@ -460,7 +460,7 @@ function applyScrollEffect(
       player.upkeep.generateLevel = true;
       messages.push("The air about you becomes charged...");
       messages.push("You feel yourself yanked upwards!");
-      process.stderr.write(`[SCROLL] RECALL to town\n`);
+      console.error(`[SCROLL] RECALL to town\n`);
     } else {
       // In town → recall to deepest level
       const target = Math.max(1, player.recallDepth ?? 1);
@@ -468,7 +468,7 @@ function applyScrollEffect(
       player.upkeep.generateLevel = true;
       messages.push("The air about you becomes charged...");
       messages.push("You feel yourself yanked downwards!");
-      process.stderr.write(`[SCROLL] RECALL to depth=${target}\n`);
+      console.error(`[SCROLL] RECALL to depth=${target}\n`);
     }
   } else {
     // Reuse potion effect handler for shared effects (NOURISH, TIMED_INC, etc.)
@@ -804,7 +804,7 @@ export function cmdPickup(
   if (!sq || sq.obj === null) {
     return { success: false, energyCost: 0, messages };
   }
-  process.stderr.write(`[PICKUP-TRY] at (${player.grid.x},${player.grid.y}) sq.obj=${sq.obj}\n`);
+  console.error(`[PICKUP-TRY] at (${player.grid.x},${player.grid.y}) sq.obj=${sq.obj}\n`);
 
   // Get the floor object from the chunk's object list
   const obj = chunk.objectList.get(sq.obj as number);
@@ -837,7 +837,7 @@ export function cmdPickup(
   addToInventory(player, obj);
   const name = obj.kind.name;
   messages.push(`You pick up ${name}.`);
-  process.stderr.write(`[PICKUP] ${name} tval=${obj.tval} sval=${obj.sval}\n`);
+  console.error(`[PICKUP] ${name} tval=${obj.tval} sval=${obj.sval}\n`);
 
   return { success: true, energyCost: STANDARD_ENERGY, messages };
 }

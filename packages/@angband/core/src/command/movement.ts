@@ -215,7 +215,7 @@ export function cmdWalk(
   if (!isPassable(chunk, target)) {
     if (isWall(chunk, target)) {
       const sq = chunkGetSquare(chunk, target);
-      process.stderr.write(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
+      console.error(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
       return failResult(["There is a wall in the way!"]);
     }
     if (isRock(chunk, target)) {
@@ -252,7 +252,7 @@ export function cmdWalk(
       }
       addToInventory(player, obj);
       messages.push(`You pick up ${obj.kind.name}.`);
-      process.stderr.write(`[PICKUP] ${obj.kind.name} tval=${obj.tval} sval=${obj.sval}\n`);
+      console.error(`[PICKUP] ${obj.kind.name} tval=${obj.tval} sval=${obj.sval}\n`);
     }
   }
 
@@ -698,7 +698,7 @@ export function cmdGoUp(
   }
 
   // Go up one level
-  process.stderr.write(`[STAIRS-UP] depth ${player.depth} → ${player.depth - 1}\n`);
+  console.error(`[STAIRS-UP] depth ${player.depth} → ${player.depth - 1}\n`);
   player.depth -= 1;
   player.upkeep.createUpStair = false;
   player.upkeep.createDownStair = true;
@@ -727,7 +727,7 @@ export function cmdGoDown(
   }
 
   // Go down one level
-  process.stderr.write(`[STAIRS] depth ${player.depth} → ${player.depth + 1}\n`);
+  console.error(`[STAIRS] depth ${player.depth} → ${player.depth + 1}\n`);
   player.depth += 1;
   player.upkeep.createUpStair = true;
   player.upkeep.createDownStair = false;

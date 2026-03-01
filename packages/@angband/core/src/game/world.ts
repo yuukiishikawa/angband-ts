@@ -272,7 +272,7 @@ export function changeLevel(state: GameState, newDepth: number): void {
     state.objectKinds,
     state.egoItems ?? [],
   );
-  process.stderr.write(`[LEVEL] Generated depth=${newDepth}: objects=${newChunk.objectList.size} monsters=${newChunk.monsters.length} kinds=${state.objectKinds.length}\n`);
+  console.error(`[LEVEL] Generated depth=${newDepth}: objects=${newChunk.objectList.size} monsters=${newChunk.monsters.length} kinds=${state.objectKinds.length}\n`);
 
   // For dungeon levels (depth > 0), place an extra down stair near the up stair
   // so the C borg can find it without traversing the entire dungeon.
@@ -299,7 +299,7 @@ export function changeLevel(state: GameState, newDepth: number): void {
             const sq = newChunk.squares[ny]![nx]!;
             if (sq.feat === Feat.FLOOR) {
               squareSetFeat(newChunk, loc(nx, ny), Feat.MORE);
-              process.stderr.write(`[LEVEL] Extra down stair at (${nx},${ny}) near up@(${upX},${upY}) dist=${Math.abs(dx)+Math.abs(dy)}\n`);
+              console.error(`[LEVEL] Extra down stair at (${nx},${ny}) near up@(${upX},${upY}) dist=${Math.abs(dx)+Math.abs(dy)}\n`);
               placed = true;
             }
           }
@@ -670,7 +670,7 @@ export async function processPlayer(
     // Debug: log failed commands to stderr
     if (!result.success && result.messages.length > 0) {
       const dirInfo = 'direction' in cmd ? ` dir=${(cmd as {direction:number}).direction}` : '';
-      process.stderr.write(`[CMD-FAIL] type=${cmd.type}${dirInfo} pos=(${state.player.grid.x},${state.player.grid.y}) depth=${state.player.depth} msg=${result.messages[0]}\n`);
+      console.error(`[CMD-FAIL] type=${cmd.type}${dirInfo} pos=(${state.player.grid.x},${state.player.grid.y}) depth=${state.player.depth} msg=${result.messages[0]}\n`);
     }
 
     // Apply messages (only show on first and last iteration to avoid spam)
@@ -732,9 +732,9 @@ export function processDeadMonsters(state: GameState): void {
       if (state.player.exp > state.player.maxExp) {
         state.player.maxExp = state.player.exp;
       }
-      process.stderr.write(`[XP] Killed ${mon.race.name} (midx=${mon.midx}): +${result.exp} XP, total=${state.player.exp}\n`);
+      console.error(`[XP] Killed ${mon.race.name} (midx=${mon.midx}): +${result.exp} XP, total=${state.player.exp}\n`);
     } else {
-      process.stderr.write(`[XP] Dead monster ${mon.race.name} (midx=${mon.midx}): 0 exp from monsterDeath\n`);
+      console.error(`[XP] Dead monster ${mon.race.name} (midx=${mon.midx}): 0 exp from monsterDeath\n`);
     }
 
     // Award gold
@@ -808,7 +808,7 @@ function checkExperience(state: GameState): void {
     }
 
     player.lev++;
-    process.stderr.write(`[LVL] LEVEL UP! CL${player.lev}: exp=${player.exp}, needed=${needed}\n`);
+    console.error(`[LVL] LEVEL UP! CL${player.lev}: exp=${player.exp}, needed=${needed}\n`);
 
     // Recalculate HP
     if (player.playerHp && player.playerHp.length >= player.lev) {
