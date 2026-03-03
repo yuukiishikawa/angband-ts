@@ -440,6 +440,8 @@ export function monsterAttackPlayer(
 
       const message = `${monName} ${methodDesc} you.`;
 
+      console.error(`[COMBAT] M→P HIT ${monName} method=${blow.method} effect=${blow.effect} rawDmg=${rawDamage} finalDmg=${effectResult.damage} AC=${playerAc} crit=${critical}\n`);
+
       results.push({
         hit: true,
         damage: effectResult.damage,
@@ -454,6 +456,8 @@ export function monsterAttackPlayer(
       const missMessage = methodMeta?.miss
         ? `${monName} misses you.`
         : "";
+
+      console.error(`[COMBAT] M→P MISS ${monName} method=${blow.method} AC=${playerAc}\n`);
 
       results.push({
         hit: false,

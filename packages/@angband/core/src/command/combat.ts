@@ -295,6 +295,8 @@ export function cmdAttack(
       // Ensure non-negative damage
       const finalDmg = Math.max(0, damage);
 
+      console.error(`[COMBAT] P→M HIT ${mon.race?.name ?? "?"} blow=${blow}/${numBlows} toHit=${toHit} AC=${monsterAc} baseDmg=${baseDmg} finalDmg=${finalDmg} monHP=${mon.hp}→${mon.hp - finalDmg}${critMsg ? " CRIT" : ""}\n`);
+
       if (finalDmg === 0) {
         messages.push("You fail to harm the monster.");
       } else {
@@ -311,9 +313,11 @@ export function cmdAttack(
       // Check for death
       if (mon.hp <= 0) {
         messages.push(`You have slain the ${mon.race?.name ?? "monster"}!`);
+        console.error(`[COMBAT] KILL ${mon.race?.name ?? "?"} totalHP=${mon.race?.hdice ?? 0}d${mon.race?.hside ?? 0} mexp=${mon.race?.mexp ?? 0}\n`);
         break;
       }
     } else {
+      console.error(`[COMBAT] P→M MISS ${mon.race?.name ?? "?"} blow=${blow}/${numBlows} toHit=${toHit} AC=${monsterAc}\n`);
       messages.push("You miss the monster.");
     }
   }

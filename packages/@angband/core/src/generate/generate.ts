@@ -377,7 +377,11 @@ function attemptGenerateDungeon(
   }
 
   // Step 5: Populate monsters
-  populateMonsters(chunk, depth, config.monsterDensity, races, rng);
+  // C: i = z_info->level_monster_min + randint1(8) + MAX(MIN(depth/3, 10), 2)
+  //    = 14 + (1-8) + MAX(MIN(depth/3, 10), 2)
+  const depthBonus = Math.max(Math.min(Math.floor(depth / 3), 10), 2);
+  const monsterCount = config.monsterDensity + (rng.randint0(8) + 1) + depthBonus;
+  populateMonsters(chunk, depth, monsterCount, races, rng);
 
   // Step 6: Populate objects
   populateObjects(chunk, depth, config.objectDensity, kinds, rng, egoItems);
