@@ -488,20 +488,24 @@ export function monsterMultiply(
   // Cap total breeders on the level
   if (chunk.numRepro >= MAX_REPRO) return false;
 
-  // Count adjacent monsters (C: k < 4 check)
-  let adjacentMons = 0;
+  // Count adjacent monsters INCLUDING SELF (C: k counts the breeder too)
+  // C loop: for y = mon.y-1 to mon.y+1, for x = mon.x-1 to mon.x+1
+  //   if (square(cave, loc(x, y))->mon > 0) k++;
+  // This includes the monster itself, so k >= 1 always.
+  let k = 1; // Start at 1 for self
   for (const dir of DIRS) {
     const neighbor = locSum(mon.grid, dir);
     if (chunkContains(chunk, neighbor) && squareHasMonster(chunk, neighbor)) {
-      adjacentMons++;
+      k++;
     }
   }
 
   // Too crowded — don't breed (C: k >= 4 → skip)
-  if (adjacentMons >= 4) return false;
+  if (k >= 4) return false;
 
-  // Rate-limit: 0 adjacent = always, otherwise 1/(k * REPRO_RATE) chance
-  if (adjacentMons > 0 && rng.randint0(adjacentMons * REPRO_RATE) !== 0) {
+  // Rate-limit: C uses one_in_(k * repro_rate) for ALL k values.
+  // k=1 (isolated): 1/8 chance. k=2: 1/16. k=3: 1/24.
+  if (rng.randint0(k * REPRO_RATE) !== 0) {
     return false;
   }
 
