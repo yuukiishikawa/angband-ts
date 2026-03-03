@@ -617,17 +617,22 @@ export function processWorld(state: GameState): void {
     }
   }
 
-  // Monster natural spawning — C uses one_in_(500) per turn (constants.txt mon-gen:chance:500)
-  // We use the same 1-in-500 random chance per turn
+  // Monster natural spawning — C uses one_in_(alloc_monster_chance=500) per
+  // process_world() call. Since processWorld runs every 10 turns, effective
+  // rate is 1/5000 per game turn, matching C.
   if (state.depth > 0 && state.rng.oneIn(500)) {
     const race = pickMonsterRace(state.depth, state.monsterRaces, state.rng);
     if (race) {
-      // Spawn away from the player (spread=20, at least 10 squares away)
-      const spawnLoc = findSpawnPoint(state.chunk, player.grid, 20, state.rng);
+      // C: pick_and_place_distant_monster(c, player->grid, max_sight + 5, ...)
+      // max_sight = 20, so minimum Chebyshev distance = 25
+      const MIN_SPAWN_DIST = 25; // C: z_info->max_sight + 5
+      const spawnLoc = findSpawnPoint(state.chunk, player.grid, MIN_SPAWN_DIST + 5, state.rng);
       if (spawnLoc) {
-        const dx = Math.abs(spawnLoc.x - player.grid.x);
-        const dy = Math.abs(spawnLoc.y - player.grid.y);
-        if (dx + dy >= 10) {
+        const chebyshev = Math.max(
+          Math.abs(spawnLoc.x - player.grid.x),
+          Math.abs(spawnLoc.y - player.grid.y),
+        );
+        if (chebyshev >= MIN_SPAWN_DIST) {
           placeNewMonster(state.chunk, spawnLoc, race, true, false, 0, state.rng);
         }
       }
