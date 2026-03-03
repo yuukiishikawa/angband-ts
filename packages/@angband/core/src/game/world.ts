@@ -16,7 +16,7 @@ import type { Chunk, MonsterId } from "../types/cave.js";
 import type { Monster } from "../types/monster.js";
 import { MonsterRaceFlag } from "../types/monster.js";
 import { Stat, TimedEffect } from "../types/player.js";
-import { PY_FOOD_WEAK } from "../player/timed.js";
+import { PY_FOOD_WEAK, PY_FOOD_FAINT, PY_FOOD_STARVE } from "../player/timed.js";
 import { TVal } from "../types/object.js";
 import type { ObjectType } from "../types/object.js";
 import type { GameState } from "./state.js";
@@ -103,6 +103,10 @@ export function turnEnergy(speed: number): number {
  * At this rate it takes ~333 turns to regen 1 HP (65536 / 197 ≈ 333).
  */
 export const PY_REGEN_NORMAL = 197;
+/** Regen rate when Weak from hunger (C: PY_REGEN_WEAK). */
+const PY_REGEN_WEAK = 98;
+/** Regen rate when Faint from hunger (C: PY_REGEN_FAINT). */
+const PY_REGEN_FAINT = 33;
 
 /**
  * Regenerate the player's hit points.
@@ -117,15 +121,22 @@ export const PY_REGEN_NORMAL = 197;
 export function regenerateHP(player: Player): void {
   if (player.chp >= player.mhp) return;
 
-  // Base regen rate (matches C PY_REGEN_NORMAL)
-  let percent = PY_REGEN_NORMAL;
-
-  // Food level affects regen (port of C logic)
+  // Base regen rate — graduated by food level (port of C logic)
   const food = player.timed[TimedEffect.FOOD] ?? 0;
-  if (food < PY_FOOD_WEAK) {
-    // Starving: no HP regen
-    percent = 0;
+  let percent = 0;
+  if (food >= PY_FOOD_WEAK) {
+    percent = PY_REGEN_NORMAL;  // 197
+  } else if (food >= PY_FOOD_FAINT) {
+    percent = PY_REGEN_WEAK;    // 98
+  } else if (food >= PY_FOOD_STARVE) {
+    percent = PY_REGEN_FAINT;   // 33
   }
+
+  // Food bonus — better fed players regen up to ~33% faster (C port)
+  // fed_pct = food / food_value; percent *= (100 + fed_pct/3) / 100
+  const FOOD_VALUE = 100;
+  const fedPct = Math.floor(food / FOOD_VALUE);
+  percent = Math.floor(percent * (100 + Math.floor(fedPct / 3)) / 100);
 
   // Resting doubles regen rate
   if (player.upkeep.resting > 0) {
@@ -135,8 +146,16 @@ export function regenerateHP(player: Player): void {
   // TODO: if (playerOfHas(player, OF_REGEN)) percent *= 2;
   // TODO: if (playerOfHas(player, OF_IMPAIR_HP)) percent /= 2;
 
-  // Accumulate fractional HP
-  player.chpFrac += percent;
+  // Status effects block HP regen (matches C exactly)
+  if ((player.timed[TimedEffect.PARALYZED] ?? 0) > 0) percent = 0;
+  if ((player.timed[TimedEffect.POISONED] ?? 0) > 0) percent = 0;
+  if ((player.timed[TimedEffect.STUN] ?? 0) > 0) percent = 0;
+  if ((player.timed[TimedEffect.CUT] ?? 0) > 0) percent = 0;
+
+  // Accumulate fractional HP (with base gain matching C's PY_REGEN_HPBASE)
+  const PY_REGEN_HPBASE = 1442;
+  const hpGainRaw = player.mhp * percent + PY_REGEN_HPBASE;
+  player.chpFrac += hpGainRaw;
 
   // Convert fractional overflow to real HP
   if (player.chpFrac >= 0x10000) {
@@ -468,12 +487,15 @@ export function processMonsters(
                 }
               }
               if (totalDamage > 0) {
+                const hpBefore = state.player.chp;
                 state.player.chp -= totalDamage;
+                console.error(`[COMBAT] DMG_TAKEN ${mon.race.name} totalDmg=${totalDamage} HP=${hpBefore}→${state.player.chp}/${state.player.mhp}\n`);
                 if (state.player.chp <= 0) {
                   state.player.chp = 0;
                   state.player.isDead = true;
                   state.dead = true;
                   state.player.diedFrom = mon.race.name;
+                  console.error(`[COMBAT] PLAYER_DIED from=${mon.race.name}\n`);
                 }
               }
             }
@@ -544,8 +566,9 @@ export function processWorld(state: GameState): void {
     regenerateMana(player);
   }
 
-  // Hunger (food digestion) — every 10 turns, matching C
-  if (state.turn % 10 === 0) {
+  // Hunger (food digestion) — C: !(turn % 100) inside process_world (called every 10 turns)
+  // Since processWorld is now called every 10 turns, use turn % 100 for every 100 turns total
+  if (state.turn % 100 === 0) {
     processHunger(player);
   }
 
@@ -654,6 +677,11 @@ export async function processPlayer(
   state: GameState,
   input: CommandInputProvider,
 ): Promise<boolean> {
+  // Paralysis: skip turn without requesting input (C: cmd_get returns CMD_SLEEP)
+  if ((state.player.timed[TimedEffect.PARALYZED] ?? 0) > 0) {
+    return true; // consume energy, let monsters/world process
+  }
+
   // Get a command from the player
   const cmd = await input.getCommand();
   if (cmd === null) return false;
@@ -958,8 +986,10 @@ export async function runGameLoop(
       break;
     }
 
-    // 5. Process world effects
-    processWorld(state);
+    // 5. Process world effects — C calls process_world() every 10 turns
+    if (state.turn % 10 === 0) {
+      processWorld(state);
+    }
 
     // Check for death from world effects (poison, starvation, etc.)
     if (state.player.isDead) {
@@ -978,6 +1008,10 @@ export async function runGameLoop(
       const newDepth = state.player.depth;
       changeLevel(state, newDepth);
       // state.monsters is updated by changeLevel()
+
+      // Update noise/scent for the new level before any monster processing
+      updateNoise(state.chunk, state.player.grid);
+      updateScent(state.chunk, state.player.grid, state.turn);
 
       // Fast-monster pre-processing: on new level, fast monsters
       // (those with energy > player's) act before the player.

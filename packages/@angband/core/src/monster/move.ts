@@ -324,9 +324,30 @@ export function monsterTakeTurn(
   const CONF = MonsterTimedEffect.CONF as number;
   const FEAR = MonsterTimedEffect.FEAR as number;
 
-  // 1. Sleeping monsters do nothing (but decrement counter)
+  // 0. Active check — C's monster_check_active() from mon-move.c:1692
+  // Uses noise heatmap (BFS distance through passable terrain).
+  // C's monster_can_hear(): noise > 0 && noise < 50 (within ~49 BFS steps)
+  // race.hearing is only used for PASS_WALL monsters in C.
+  const noiseVal = chunk.noise?.grids?.[mon.grid.y]?.[mon.grid.x] ?? 0;
+  const canHear = noiseVal > 0 && noiseVal < 50;
+  const isActive = canHear || mon.hp < mon.maxhp;
+  if (!isActive) {
+    return { type: "idle" };
+  }
+
+  // 1. Sleeping monsters: probabilistic sleep reduction (C: monster_reduce_sleep)
   if (mon.mTimed[SLEEP]! > 0) {
-    mon.mTimed[SLEEP] = mon.mTimed[SLEEP]! - 1;
+    // C: (randint0(1024)^3) <= (1 << (30 - stealth))
+    // Warrior stealth ~1 → threshold ~813/1024 ≈ 79%
+    const notice = rng.randint0(1024);
+    const STEALTH = 1; // Warrior base stealth
+    const playerNoise = (1 << (30 - STEALTH)) >>> 0;
+    if (notice * notice * notice <= playerNoise) {
+      // Distance-based reduction: C uses 100/local_noise where noise ≈ distance
+      const pathDist = noiseVal > 0 ? noiseVal : chebyshev(mon.grid, playerLoc);
+      const reduction = Math.max(1, Math.floor(100 / Math.max(1, pathDist)));
+      mon.mTimed[SLEEP] = Math.max(0, mon.mTimed[SLEEP]! - reduction);
+    }
     return { type: "idle" };
   }
 

@@ -236,14 +236,14 @@ function giveBonusItems(
   // Items the borg normally buys from town stores.
   // C borg junk code now skips healing potions and Phase Door in remote mode,
   // so these won't be wasted. Give enough for sustained dungeon exploration.
-  const bonusItems: { tval: number; name: string; qty: number }[] = [
-    // Better weapon — Long Sword (2d5) replaces starting Dagger (1d4)
+  const bonusItems: { tval: number; name: string; qty: number; toH?: number; toD?: number; toA?: number }[] = [
+    // Better weapon — Long Sword (2d5,+4,+4) simulates store purchase
     // Auto-equipped via autoEquipStartingItems()
-    { tval: 9, name: "Long Sword", qty: 1 },
-    // Better armor — Studded Leather Armour [12,+0] replaces Soft Leather [8,+0]
-    { tval: 16, name: "Studded Leather Armour", qty: 1 },
-    // Shield — Small Metal Shield [5,+0] for extra AC
-    { tval: 14, name: "Small Metal Shield", qty: 1 },
+    { tval: 9, name: "Long Sword", qty: 1, toH: 4, toD: 4 },
+    // Better armor — Studded Leather Armour [12,+3] simulates store purchase
+    { tval: 16, name: "Studded Leather Armour", qty: 1, toA: 3 },
+    // Shield — Small Metal Shield [5,+3] simulates store purchase
+    { tval: 14, name: "Small Metal Shield", qty: 1, toA: 3 },
     // Food (borg tracks BI_FOOD_HI for descent decisions)
     { tval: 28, name: "Ration of Food", qty: 10 },
     // Healing potions (protected from junking in remote mode)
@@ -267,7 +267,12 @@ function giveBonusItems(
       (k) => k.tval === bonus.tval && (k.name === bonus.name || cleanName(k.name) === bonusLower),
     );
     if (kind) {
-      pGear.inventory.push(createStartObject(kind, bonus.qty));
+      const obj = createStartObject(kind, bonus.qty);
+      // Apply store-quality enchantments (simulates buying from shops)
+      if (bonus.toH !== undefined) (obj as { toH: number }).toH = bonus.toH;
+      if (bonus.toD !== undefined) (obj as { toD: number }).toD = bonus.toD;
+      if (bonus.toA !== undefined) (obj as { toA: number }).toA = bonus.toA;
+      pGear.inventory.push(obj);
     } else {
       process.stderr.write(`[BonusItem] FAILED to find kind for "${bonus.name}" tval=${bonus.tval}\n`);
     }
@@ -343,9 +348,10 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
   lines.push(
     `STAT str=${p.statCur[Stat.STR]} int=${p.statCur[Stat.INT]} wis=${p.statCur[Stat.WIS]} dex=${p.statCur[Stat.DEX]} con=${p.statCur[Stat.CON]}`
   );
-  // Camera offset and player position for C borg's coordinate mapping
+  // Camera offset, player position, and monster count for C borg
+  const aliveMonsters = state.monsters.filter((m: { hp: number } | null) => m && m.hp > 0).length;
   lines.push(
-    `STAT wx=${renderer.getCameraX()} wy=${renderer.getCameraY()} px=${p.grid.x} py=${p.grid.y}`
+    `STAT wx=${renderer.getCameraX()} wy=${renderer.getCameraY()} px=${p.grid.x} py=${p.grid.y} mon_count=${aliveMonsters}`
   );
 
   // Inventory and equipment for C borg's borg_items[]
