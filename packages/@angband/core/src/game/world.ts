@@ -14,7 +14,7 @@
 import type { Player } from "../types/player.js";
 import type { Chunk, MonsterId } from "../types/cave.js";
 import type { Monster } from "../types/monster.js";
-import { MonsterRaceFlag } from "../types/monster.js";
+import { MonsterRaceFlag, MonsterTempFlag, MonsterTimedEffect } from "../types/monster.js";
 import { Stat, TimedEffect } from "../types/player.js";
 import { PY_FOOD_WEAK, PY_FOOD_FAINT, PY_FOOD_STARVE } from "../player/timed.js";
 import { TVal } from "../types/object.js";
@@ -31,7 +31,7 @@ import { squareSetFeat, squareIsFloor } from "../cave/square.js";
 import { Feat } from "../types/cave.js";
 import { loc } from "../z/index.js";
 import { generateDungeon, DEFAULT_DUNGEON_CONFIG } from "../generate/generate.js";
-import { monsterTakeTurn, monsterMove, monsterMultiply } from "../monster/move.js";
+import { monsterTakeTurn, monsterMove, monsterMultiply, monsterCheckActive } from "../monster/move.js";
 import { pickMonsterRace, placeNewMonster, findSpawnPoint } from "../monster/make.js";
 import { monsterAttackPlayer, applyBlowEffect } from "../monster/attack.js";
 import { monsterDeath } from "../monster/death.js";
@@ -452,6 +452,22 @@ export function processMonsters(
     // Process turns while the monster has enough energy
     // minEnergy filter: skip monsters below the threshold (fast-monster phase)
     while (mon.energy >= MOVE_ENERGY && mon.energy >= minEnergy) {
+      // C: monster_check_active() BEFORE any action (including multiply)
+      // Inactive monsters skip their entire turn — no breeding, no movement.
+      if (!monsterCheckActive(chunk, mon, state.turn)) {
+        mon.mflag.off(MonsterTempFlag.ACTIVE);
+        mon.energy -= MOVE_ENERGY;
+        continue;
+      }
+      mon.mflag.on(MonsterTempFlag.ACTIVE);
+
+      // C: awake active monsters have 10% chance/turn to become AWARE
+      // AWARE monsters track the player more accurately
+      const SLEEP = MonsterTimedEffect.SLEEP as number;
+      if ((mon.mTimed[SLEEP] ?? 0) === 0 && rng.randint0(10) === 0) {
+        mon.mflag.on(MonsterTempFlag.AWARE);
+      }
+
       // Try to multiply FIRST — this uses the turn (C: monster_turn_multiply)
       let didMultiply = false;
       if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
