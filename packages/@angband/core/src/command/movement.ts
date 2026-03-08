@@ -213,9 +213,9 @@ export function cmdWalk(
 
   const target = targetFromDir(player, dir);
 
-  // Bounds check
+  // Bounds check (consume energy to prevent borg infinite retry)
   if (!chunkContains(chunk, target)) {
-    return failResult(["There is a wall in the way!"]);
+    return successResult(STANDARD_ENERGY, ["There is a wall in the way!"]);
   }
 
   // Monster in the way -> attack
@@ -228,17 +228,17 @@ export function cmdWalk(
     return cmdOpen(player, chunk, dir, rng);
   }
 
-  // Not passable -> blocked
+  // Not passable -> blocked (consume energy so borg doesn't loop infinitely)
   if (!isPassable(chunk, target)) {
     if (isWall(chunk, target)) {
       const sq = chunkGetSquare(chunk, target);
       console.error(`[WALL-HIT] dir=${dir} from=(${player.grid.x},${player.grid.y}) to=(${target.x},${target.y}) feat=${sq.feat}\n`);
-      return failResult(["There is a wall in the way!"]);
+      return successResult(STANDARD_ENERGY, ["There is a wall in the way!"]);
     }
     if (isRock(chunk, target)) {
-      return failResult(["There is a pile of rubble in the way!"]);
+      return successResult(STANDARD_ENERGY, ["There is a pile of rubble in the way!"]);
     }
-    return failResult(["You cannot pass through there."]);
+    return successResult(STANDARD_ENERGY, ["You cannot pass through there."]);
   }
 
   // Move the player
@@ -366,9 +366,9 @@ export function cmdOpen(
     return failResult(["There is a monster in the way!"]);
   }
 
-  // Must be a closed door
+  // Must be a closed door (consume energy so borg doesn't loop on misidentified doors)
   if (!isClosedDoor(chunk, target)) {
-    return failResult(["You see nothing there to open."]);
+    return successResult(STANDARD_ENERGY, ["You see nothing there to open."]);
   }
 
   // Jammed door
