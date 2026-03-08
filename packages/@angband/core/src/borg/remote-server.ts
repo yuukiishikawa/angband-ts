@@ -45,6 +45,7 @@ import { Stat, TimedEffect } from "../types/player.js";
 import { createStore, initStoreStock, StoreType, STORE_TYPE_MAX } from "../store/store.js";
 import type { Store } from "../store/store.js";
 import type { GameCommand } from "../command/core.js";
+import { CommandType } from "../command/core.js";
 import { GameEventType } from "../game/event.js";
 import {
   giveStartingItems,
@@ -664,11 +665,26 @@ export class RemoteBorgServer {
           // Buffer command — C borg may send multiple keys per frame
           this.pendingCommands.push(cmd);
         }
+      } else if (this.keyTranslator.pendingWasCancelled) {
+        // Borg changed its mind mid-command (e.g. sent '+' twice instead of
+        // '+' then direction). The old pending was cancelled. Resolve the
+        // waiting keyResolver with a SEARCH (no-op 1 turn) to unstick the
+        // game loop, then the new pending will be handled on the next cycle.
+        this.keyTranslator.reset(); // clear the new pending too
+        if (this.keyResolver) {
+          console.error(`[RemoteBorg] Pending cancelled by key code=${keyCode} ch='${String.fromCharCode(keyCode)}' → resolving as SEARCH\n`);
+          this.keyResolver({ type: CommandType.SEARCH });
+          this.keyResolver = null;
+        } else {
+          this.pendingCommands.push({ type: CommandType.SEARCH });
+        }
+        this.sendScreenFrame();
       } else {
         // Partial command (translator needs more keys) — send an
         // echo frame so the C borg doesn't block waiting for a
         // frame that never comes. The frame contains the unchanged
         // screen (no game state change occurred).
+        console.error(`[RemoteBorg] Partial key: code=${keyCode} ch='${String.fromCharCode(keyCode)}' (waiting for more input)\n`);
         this.sendScreenFrame();
       }
     } else if (line === "QUIT") {
@@ -703,7 +719,18 @@ export class RemoteBorgServer {
     this.sendScreenFrame();
 
     return new Promise((resolve) => {
+      // B1 fix: safety timeout to prevent indefinite hang if borg stops responding
+      const BORG_TIMEOUT_MS = 30_000;
+      const timer = setTimeout(() => {
+        if (this.keyResolver) {
+          console.error(`[RemoteBorg] TIMEOUT: no command received in ${BORG_TIMEOUT_MS / 1000}s — borg silence detected\n`);
+          this.keyResolver = null;
+          resolve(null);
+        }
+      }, BORG_TIMEOUT_MS);
+
       this.keyResolver = (cmd) => {
+        clearTimeout(timer);
         if (cmd) {
           console.log(`[RemoteBorg] Got command: type=${cmd.type}`);
         } else {

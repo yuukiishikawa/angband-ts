@@ -78,6 +78,9 @@ const C_BODY_TO_EQUIP_SLOT: number[] = [
 export class KeyTranslator {
   private pending: PendingState | null = null;
 
+  /** True when translate() cancelled a pending command (borg changed its mind). */
+  pendingWasCancelled = false;
+
   /**
    * Reset any pending multi-key state.
    */
@@ -93,6 +96,7 @@ export class KeyTranslator {
    * @returns        A GameCommand if the input is complete, null if more input needed
    */
   translate(keyCode: number, mods: number): GameCommand | null {
+    this.pendingWasCancelled = false;
     const ch = String.fromCharCode(keyCode);
 
     // Handle CTRL modifier
@@ -146,6 +150,15 @@ export class KeyTranslator {
     // If we have a pending command waiting for direction
     if (this.pending !== null && dir !== undefined && dir !== 5) {
       return this.completeWithDirection(dir);
+    }
+
+    // If pending is set but we got a non-direction key (borg changed its mind),
+    // cancel pending and fall through to process the new key normally.
+    if (this.pending !== null && dir === undefined) {
+      console.error(`[KEY] Pending '${this.pending.command}' cancelled by new key '${ch}' (code=${keyCode})\n`);
+      this.pending = null;
+      this.pendingWasCancelled = true;
+      // Fall through — the new key will be processed below
     }
 
     // Direction key without pending = WALK

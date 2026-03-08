@@ -472,6 +472,9 @@ export function processMonsters(
       let didMultiply = false;
       if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
         didMultiply = monsterMultiply(chunk, mon, rng);
+        if (didMultiply) {
+          console.error(`[REPRO] ${mon.race.name} multiplied! numRepro=${chunk.numRepro}, monCnt=${chunk.monCnt}\n`);
+        }
       }
 
       if (!didMultiply) {
@@ -832,6 +835,12 @@ export function processDeadMonsters(state: GameState): void {
     const sq = chunk.squares[mon.grid.y]?.[mon.grid.x];
     if (sq && sq.mon === mon.midx) {
       (sq as { mon: number }).mon = 0;
+    }
+
+    // Decrement breeder count if this was a multiplying monster (B3 fix)
+    if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
+      (chunk as { numRepro: number }).numRepro = Math.max(0, chunk.numRepro - 1);
+      console.error(`[REPRO] Breeder died: ${mon.race.name} midx=${mon.midx}, numRepro=${chunk.numRepro}\n`);
     }
 
     // Null out the monster slot (do NOT splice — preserves midx invariant)
