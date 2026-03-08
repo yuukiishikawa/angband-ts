@@ -178,6 +178,14 @@ export function addToInventory(
   const p = player as PlayerWithGear;
   ensureInventory(p);
 
+  // Reuse a null slot left by removeFromInventory (stable slot indices)
+  for (let i = 0; i < p.inventory.length; i++) {
+    if (p.inventory[i] == null) {
+      p.inventory[i] = obj;
+      return true;
+    }
+  }
+
   if (p.inventory.length >= MAX_INVENTORY_SIZE) {
     return false;
   }
@@ -202,7 +210,11 @@ export function removeFromInventory(
     return null;
   }
 
-  const [removed] = p.inventory.splice(index, 1);
+  const removed = p.inventory[index]!;
+  // Set slot to null instead of splice to keep stable slot indices.
+  // C borg references items by slot index, and splice would shift all
+  // subsequent items, causing slot mismatch on the next INVEN frame.
+  (p.inventory as (ObjectType | null)[])[index] = null;
   return removed ?? null;
 }
 
@@ -228,6 +240,8 @@ export function getInventoryItem(
 export function inventoryIsFull(player: Player): boolean {
   const p = player as PlayerWithGear;
   ensureInventory(p);
+  // Check for null slots (freed by removeFromInventory)
+  if (p.inventory.some((item) => item == null)) return false;
   return p.inventory.length >= MAX_INVENTORY_SIZE;
 }
 
@@ -237,7 +251,7 @@ export function inventoryIsFull(player: Player): boolean {
 export function inventoryCount(player: Player): number {
   const p = player as PlayerWithGear;
   ensureInventory(p);
-  return p.inventory.length;
+  return p.inventory.filter((item) => item != null).length;
 }
 
 // ---------------------------------------------------------------------------

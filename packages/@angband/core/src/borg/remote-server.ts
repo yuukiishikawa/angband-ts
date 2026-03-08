@@ -792,7 +792,7 @@ export class RemoteBorgServer {
     for (const target of targets) {
       // Find existing stack in inventory
       const existing = p.inventory.find(
-        (item) => item.tval === target.tval && item.kind && cleanName(item.kind.name) === target.name.toLowerCase(),
+        (item) => item != null && item.tval === target.tval && item.kind && cleanName(item.kind.name) === target.name.toLowerCase(),
       );
       if (existing) {
         if (existing.number < target.targetQty) {
@@ -806,7 +806,14 @@ export class RemoteBorgServer {
           (k) => k.tval === target.tval && cleanName(k.name) === target.name.toLowerCase(),
         );
         if (kind) {
-          p.inventory.push(createStartObject(kind, target.targetQty));
+          const newObj = createStartObject(kind, target.targetQty);
+          // Reuse a null slot if available (stable slot indices)
+          const nullIdx = p.inventory.findIndex((it) => it == null);
+          if (nullIdx >= 0) {
+            p.inventory[nullIdx] = newObj;
+          } else {
+            p.inventory.push(newObj);
+          }
           process.stderr.write(`[RESUPPLY] ${target.name}: new stack of ${target.targetQty}\n`);
         }
       }
