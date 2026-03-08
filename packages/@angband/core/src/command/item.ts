@@ -454,6 +454,10 @@ function applyScrollEffect(
         player.grid = newPos;
         messages.push(dist <= 10 ? "You blink." : "You teleport away.");
         console.error(`[SCROLL] TELEPORT dist=${actualDist} to (${newPos.x},${newPos.y})\n`);
+      } else {
+        // B2 fix: tell the borg teleport failed (don't silently consume scroll)
+        messages.push("You fail to teleport!");
+        console.error(`[SCROLL] TELEPORT FAILED dist=${actualDist} — no valid destination found\n`);
       }
     }
   } else if (eff.index === EffectType.RECALL) {

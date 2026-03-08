@@ -31,6 +31,8 @@ import {
   squareHasMonster,
   squareIsClosedDoor,
   squareIsWall,
+  squareIsView,
+  scentAge,
 } from "../cave/index.js";
 import { createMonster, placeNewMonster } from "./make.js";
 
@@ -289,6 +291,50 @@ export function monsterMove(
   mon.grid = newLoc;
 }
 
+// ── Active check ──
+
+/**
+ * C's monster_check_active() from mon-move.c:1692.
+ * Determines whether a monster is active enough to take a turn (including multiply).
+ * Inactive monsters skip their entire turn — no movement, no spells, no breeding.
+ *
+ * C checks 6 conditions:
+ *   1. Within hearing range AND passes walls (straight-line access)
+ *   2. Monster is hurt (hp < maxhp)
+ *   3. Monster is in player's field of view (square_isview)
+ *   4. Monster can hear the player (noise heatmap)
+ *   5. Monster can smell the player (scent trail)
+ *   6. Monster is taking terrain damage (not yet ported — no terrain damage in TS)
+ */
+export function monsterCheckActive(chunk: Chunk, mon: Monster, turn: number = 0): boolean {
+  const hearing = mon.race.hearing ?? 20;
+  const passesWalls = mon.race.flags.has(MonsterRaceFlag.PASS_WALL) ||
+    mon.race.flags.has(MonsterRaceFlag.KILL_WALL);
+
+  // 2. Monster is hurt
+  if (mon.hp < mon.maxhp) return true;
+
+  // 3. Monster is in player's field of view (VIEW flag set by updateView)
+  if (squareIsView(chunk, mon.grid)) return true;
+
+  // 4. Monster can hear the player (noise heatmap)
+  const noiseVal = chunk.noise?.grids?.[mon.grid.y]?.[mon.grid.x] ?? 0;
+  const STEALTH = 1; // Warrior base stealth
+  const baseHearing = hearing - Math.floor(STEALTH / 3);
+  if (noiseVal > 0 && baseHearing > noiseVal) return true;
+
+  // 1 (deferred): passes_walls + within hearing — use noise as distance proxy
+  if (passesWalls && noiseVal > 0 && noiseVal <= hearing) return true;
+
+  // 5. Monster can smell the player (scent trail — age < hearing * 10)
+  if (turn > 0) {
+    const age = scentAge(chunk, mon.grid, turn);
+    if (age < hearing * 10) return true;
+  }
+
+  return false;
+}
+
 // ── Main AI decision ──
 
 /**
@@ -324,14 +370,9 @@ export function monsterTakeTurn(
   const CONF = MonsterTimedEffect.CONF as number;
   const FEAR = MonsterTimedEffect.FEAR as number;
 
-  // 0. Active check — C's monster_check_active() from mon-move.c:1692
-  // Uses noise heatmap (BFS distance through passable terrain).
-  // C's monster_can_hear(): noise > 0 && noise < 50 (within ~49 BFS steps)
-  // race.hearing is only used for PASS_WALL monsters in C.
-  const noiseVal = chunk.noise?.grids?.[mon.grid.y]?.[mon.grid.x] ?? 0;
-  const canHear = noiseVal > 0 && noiseVal < 50;
-  const isActive = canHear || mon.hp < mon.maxhp;
-  if (!isActive) {
+  // 0. Active check — also used in world.ts before multiply, but kept here
+  //    as a safety net in case monsterTakeTurn is called without prior check.
+  if (!monsterCheckActive(chunk, mon)) {
     return { type: "idle" };
   }
 
@@ -344,7 +385,8 @@ export function monsterTakeTurn(
     const playerNoise = (1 << (30 - STEALTH)) >>> 0;
     if (notice * notice * notice <= playerNoise) {
       // Distance-based reduction: C uses 100/local_noise where noise ≈ distance
-      const pathDist = noiseVal > 0 ? noiseVal : chebyshev(mon.grid, playerLoc);
+      const localNoise = chunk.noise?.grids?.[mon.grid.y]?.[mon.grid.x] ?? 0;
+      const pathDist = localNoise > 0 ? localNoise : chebyshev(mon.grid, playerLoc);
       const reduction = Math.max(1, Math.floor(100 / Math.max(1, pathDist)));
       mon.mTimed[SLEEP] = Math.max(0, mon.mTimed[SLEEP]! - reduction);
     }
@@ -476,7 +518,7 @@ const MAX_REPRO = 100;
  *   - 1-3 adjacent: 1/(k * REPRO_RATE) chance
  * Successful breeding costs the monster's turn.
  */
-const REPRO_RATE = 8; // C: z_info->repro_monster_rate
+const REPRO_RATE = 10; // C: z_info->repro_monster_rate
 
 export function monsterMultiply(
   chunk: Chunk,
@@ -488,20 +530,24 @@ export function monsterMultiply(
   // Cap total breeders on the level
   if (chunk.numRepro >= MAX_REPRO) return false;
 
-  // Count adjacent monsters (C: k < 4 check)
-  let adjacentMons = 0;
+  // Count adjacent monsters INCLUDING SELF (C: k counts the breeder too)
+  // C loop: for y = mon.y-1 to mon.y+1, for x = mon.x-1 to mon.x+1
+  //   if (square(cave, loc(x, y))->mon > 0) k++;
+  // This includes the monster itself, so k >= 1 always.
+  let k = 1; // Start at 1 for self
   for (const dir of DIRS) {
     const neighbor = locSum(mon.grid, dir);
     if (chunkContains(chunk, neighbor) && squareHasMonster(chunk, neighbor)) {
-      adjacentMons++;
+      k++;
     }
   }
 
   // Too crowded — don't breed (C: k >= 4 → skip)
-  if (adjacentMons >= 4) return false;
+  if (k >= 4) return false;
 
-  // Rate-limit: 0 adjacent = always, otherwise 1/(k * REPRO_RATE) chance
-  if (adjacentMons > 0 && rng.randint0(adjacentMons * REPRO_RATE) !== 0) {
+  // Rate-limit: C uses one_in_(k * repro_rate) for ALL k values.
+  // k=1 (isolated): 1/8 chance. k=2: 1/16. k=3: 1/24.
+  if (rng.randint0(k * REPRO_RATE) !== 0) {
     return false;
   }
 

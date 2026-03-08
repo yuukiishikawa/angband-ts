@@ -136,6 +136,23 @@ function isDownStair(chunk: Chunk, atLoc: Loc): boolean {
   return featHasFlag(chunk, atLoc, TerrainFlag.DOWNSTAIR);
 }
 
+/**
+ * Find an adjacent stair (8-directional) within 1 tile of the given position.
+ * Used as a tolerance fix for the remote borg which sometimes overshoots stairs.
+ */
+function findAdjacentStair(chunk: Chunk, loc: Loc, down: boolean): Loc | null {
+  const check = down ? isDownStair : isUpStair;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const adj = { x: loc.x + dx, y: loc.y + dy };
+      if (adj.x < 0 || adj.x >= chunk.width || adj.y < 0 || adj.y >= chunk.height) continue;
+      if (check(chunk, adj)) return adj;
+    }
+  }
+  return null;
+}
+
 /** Check if a square has a locked door. */
 function isLockedDoor(chunk: Chunk, atLoc: Loc): boolean {
   return featHasFlag(chunk, atLoc, TerrainFlag.DOOR_LOCKED);
@@ -688,7 +705,14 @@ export function cmdGoUp(
 ): CommandResult {
   // Must be standing on an up staircase
   if (!isUpStair(chunk, player.grid)) {
-    return failResult(["I see no up staircase here."]);
+    // Remote borg tolerance: auto-snap to adjacent up stair
+    const adj = findAdjacentStair(chunk, player.grid, false);
+    if (adj) {
+      console.error(`[STAIRS] Auto-snap to up stair: (${player.grid.x},${player.grid.y}) → (${adj.x},${adj.y})\n`);
+      player.grid = adj;
+    } else {
+      return failResult(["I see no up staircase here."]);
+    }
   }
 
   // Cannot go above surface (depth 0)
@@ -722,7 +746,15 @@ export function cmdGoDown(
 ): CommandResult {
   // Must be standing on a down staircase
   if (!isDownStair(chunk, player.grid)) {
-    return failResult(["I see no down staircase here."]);
+    // Remote borg tolerance: if player is 1 tile off from a stair,
+    // auto-snap to the stair (borg's flow sometimes overshoots by 1)
+    const adj = findAdjacentStair(chunk, player.grid, true);
+    if (adj) {
+      console.error(`[STAIRS] Auto-snap to down stair: (${player.grid.x},${player.grid.y}) → (${adj.x},${adj.y})\n`);
+      player.grid = adj;
+    } else {
+      return failResult(["I see no down staircase here."]);
+    }
   }
 
   // Go down one level

@@ -14,7 +14,7 @@
 import type { Player } from "../types/player.js";
 import type { Chunk, MonsterId } from "../types/cave.js";
 import type { Monster } from "../types/monster.js";
-import { MonsterRaceFlag } from "../types/monster.js";
+import { MonsterRaceFlag, MonsterTempFlag, MonsterTimedEffect } from "../types/monster.js";
 import { Stat, TimedEffect } from "../types/player.js";
 import { PY_FOOD_WEAK, PY_FOOD_FAINT, PY_FOOD_STARVE } from "../player/timed.js";
 import { TVal } from "../types/object.js";
@@ -31,7 +31,7 @@ import { squareSetFeat, squareIsFloor } from "../cave/square.js";
 import { Feat } from "../types/cave.js";
 import { loc } from "../z/index.js";
 import { generateDungeon, DEFAULT_DUNGEON_CONFIG } from "../generate/generate.js";
-import { monsterTakeTurn, monsterMove, monsterMultiply } from "../monster/move.js";
+import { monsterTakeTurn, monsterMove, monsterMultiply, monsterCheckActive } from "../monster/move.js";
 import { pickMonsterRace, placeNewMonster, findSpawnPoint } from "../monster/make.js";
 import { monsterAttackPlayer, applyBlowEffect } from "../monster/attack.js";
 import { monsterDeath } from "../monster/death.js";
@@ -452,10 +452,29 @@ export function processMonsters(
     // Process turns while the monster has enough energy
     // minEnergy filter: skip monsters below the threshold (fast-monster phase)
     while (mon.energy >= MOVE_ENERGY && mon.energy >= minEnergy) {
+      // C: monster_check_active() BEFORE any action (including multiply)
+      // Inactive monsters skip their entire turn — no breeding, no movement.
+      if (!monsterCheckActive(chunk, mon, state.turn)) {
+        mon.mflag.off(MonsterTempFlag.ACTIVE);
+        mon.energy -= MOVE_ENERGY;
+        continue;
+      }
+      mon.mflag.on(MonsterTempFlag.ACTIVE);
+
+      // C: awake active monsters have 10% chance/turn to become AWARE
+      // AWARE monsters track the player more accurately
+      const SLEEP = MonsterTimedEffect.SLEEP as number;
+      if ((mon.mTimed[SLEEP] ?? 0) === 0 && rng.randint0(10) === 0) {
+        mon.mflag.on(MonsterTempFlag.AWARE);
+      }
+
       // Try to multiply FIRST — this uses the turn (C: monster_turn_multiply)
       let didMultiply = false;
       if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
         didMultiply = monsterMultiply(chunk, mon, rng);
+        if (didMultiply) {
+          console.error(`[REPRO] ${mon.race.name} multiplied! numRepro=${chunk.numRepro}, monCnt=${chunk.monCnt}\n`);
+        }
       }
 
       if (!didMultiply) {
@@ -617,17 +636,22 @@ export function processWorld(state: GameState): void {
     }
   }
 
-  // Monster natural spawning — C uses one_in_(500) per turn (constants.txt mon-gen:chance:500)
-  // We use the same 1-in-500 random chance per turn
+  // Monster natural spawning — C uses one_in_(alloc_monster_chance=500) per
+  // process_world() call. Since processWorld runs every 10 turns, effective
+  // rate is 1/5000 per game turn, matching C.
   if (state.depth > 0 && state.rng.oneIn(500)) {
     const race = pickMonsterRace(state.depth, state.monsterRaces, state.rng);
     if (race) {
-      // Spawn away from the player (spread=20, at least 10 squares away)
-      const spawnLoc = findSpawnPoint(state.chunk, player.grid, 20, state.rng);
+      // C: pick_and_place_distant_monster(c, player->grid, max_sight + 5, ...)
+      // max_sight = 20, so minimum Chebyshev distance = 25
+      const MIN_SPAWN_DIST = 25; // C: z_info->max_sight + 5
+      const spawnLoc = findSpawnPoint(state.chunk, player.grid, MIN_SPAWN_DIST + 5, state.rng);
       if (spawnLoc) {
-        const dx = Math.abs(spawnLoc.x - player.grid.x);
-        const dy = Math.abs(spawnLoc.y - player.grid.y);
-        if (dx + dy >= 10) {
+        const chebyshev = Math.max(
+          Math.abs(spawnLoc.x - player.grid.x),
+          Math.abs(spawnLoc.y - player.grid.y),
+        );
+        if (chebyshev >= MIN_SPAWN_DIST) {
           placeNewMonster(state.chunk, spawnLoc, race, true, false, 0, state.rng);
         }
       }
@@ -811,6 +835,12 @@ export function processDeadMonsters(state: GameState): void {
     const sq = chunk.squares[mon.grid.y]?.[mon.grid.x];
     if (sq && sq.mon === mon.midx) {
       (sq as { mon: number }).mon = 0;
+    }
+
+    // Decrement breeder count if this was a multiplying monster (B3 fix)
+    if (mon.race.flags.has(MonsterRaceFlag.MULTIPLY)) {
+      (chunk as { numRepro: number }).numRepro = Math.max(0, chunk.numRepro - 1);
+      console.error(`[REPRO] Breeder died: ${mon.race.name} midx=${mon.midx}, numRepro=${chunk.numRepro}\n`);
     }
 
     // Null out the monster slot (do NOT splice — preserves midx invariant)
