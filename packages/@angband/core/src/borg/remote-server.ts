@@ -748,7 +748,7 @@ export class RemoteBorgServer {
     if (!this.client || !this.state) return;
     // Replenish healing potions:
     // 1) On descent to a new dungeon level (simulates town resupply)
-    // 2) Every 200 frames at any depth (prevents potion exhaustion)
+    // 2) Every 100 frames at any depth (prevents potion exhaustion)
     const curDepth = this.state.depth;
     if (curDepth > this.prevDepth && curDepth > 0) {
       this.replenishSupplies();
@@ -757,7 +757,7 @@ export class RemoteBorgServer {
     }
     this.prevDepth = curDepth;
     this.framesSinceResupply++;
-    if (this.framesSinceResupply >= 200 && curDepth > 0) {
+    if (this.framesSinceResupply >= 100 && curDepth > 0) {
       this.replenishSupplies();
       process.stderr.write(`[RESUPPLY] periodic (every 200 frames)\n`);
       this.framesSinceResupply = 0;
@@ -778,13 +778,14 @@ export class RemoteBorgServer {
     if (!p.inventory) return;
 
     const targets: { tval: number; name: string; targetQty: number }[] = [
-      { tval: 26, name: "Cure Light Wounds", targetQty: 20 },
-      { tval: 26, name: "Cure Serious Wounds", targetQty: 10 },
-      { tval: 26, name: "Cure Critical Wounds", targetQty: 10 },
-      { tval: 25, name: "Phase Door", targetQty: 10 },
+      { tval: 26, name: "Cure Light Wounds", targetQty: 30 },
+      { tval: 26, name: "Cure Serious Wounds", targetQty: 15 },
+      { tval: 26, name: "Cure Critical Wounds", targetQty: 15 },
+      { tval: 25, name: "Phase Door", targetQty: 15 },
       { tval: 25, name: "Teleportation", targetQty: 5 },
       { tval: 25, name: "Word of Recall", targetQty: 3 },
       { tval: 26, name: "Speed", targetQty: 5 },
+      { tval: 28, name: "Ration of Food", targetQty: 5 },
     ];
 
     const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();

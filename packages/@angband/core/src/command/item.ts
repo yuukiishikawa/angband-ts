@@ -340,7 +340,7 @@ export function cmdQuaff(
   if (!obj) {
     return {
       success: false,
-      energyCost: 0,
+      energyCost: STANDARD_ENERGY,
       messages: ["You have no potions to quaff."],
     };
   }
@@ -349,7 +349,7 @@ export function cmdQuaff(
     console.error(`[QUAFF] Item at index ${itemIndex} is not a potion (tval=${obj.tval})\n`);
     return {
       success: false,
-      energyCost: 0,
+      energyCost: STANDARD_ENERGY,
       messages: ["You cannot quaff that!"],
     };
   }
@@ -400,7 +400,7 @@ export function cmdRead(
   if (!obj) {
     return {
       success: false,
-      energyCost: 0,
+      energyCost: STANDARD_ENERGY,
       messages: ["You have no scrolls to read."],
     };
   }
@@ -408,7 +408,7 @@ export function cmdRead(
   if (obj.tval !== TVal.SCROLL) {
     return {
       success: false,
-      energyCost: 0,
+      energyCost: STANDARD_ENERGY,
       messages: ["You cannot read that!"],
     };
   }
@@ -874,7 +874,7 @@ export function cmdDrop(
   if (!obj) {
     return {
       success: false,
-      energyCost: 0,
+      energyCost: STANDARD_ENERGY,
       messages: ["You have nothing to drop."],
     };
   }
