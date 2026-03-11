@@ -37,7 +37,7 @@ import { monsterAttackPlayer, applyBlowEffect } from "../monster/attack.js";
 import { monsterDeath } from "../monster/death.js";
 import { monsterChooseSpell, monsterCastSpell } from "../monster/spell.js";
 import { expForPlayerLevel } from "../player/util.js";
-import { calcBonuses } from "../player/calcs.js";
+import { calcBonuses, calcMana } from "../player/calcs.js";
 
 // ── Constants ──
 
@@ -623,6 +623,23 @@ export function processWorld(state: GameState): void {
   // Decrement timed effects
   decreaseTimeouts(player);
 
+  // Word of Recall countdown (not in timed[] array — separate player property)
+  if (player.wordRecall > 0) {
+    player.wordRecall--;
+    if (player.wordRecall === 0) {
+      // Trigger recall: swap between town and dungeon
+      if (player.depth === 0) {
+        // From town → go to deepest explored level
+        player.depth = player.recallDepth || 1;
+      } else {
+        // From dungeon → go to town
+        player.recallDepth = Math.max(player.recallDepth || 0, player.depth);
+        player.depth = 0;
+      }
+      player.upkeep.generateLevel = true;
+    }
+  }
+
   // Monster HP regeneration — every 100 turns, 1/8 max HP
   if (state.turn % 100 === 0) {
     for (const mon of state.monsters) {
@@ -891,6 +908,28 @@ function checkExperience(state: GameState): void {
 
     // Recalculate bonuses (skills improve with level)
     player.state = calcBonuses(player);
+
+    // Recalculate mana for spellcasting classes
+    const newMsp = calcMana(player);
+    if (newMsp > 0) {
+      const oldMsp = player.msp;
+      player.msp = newMsp;
+      // Scale current SP proportionally, then fill to max on level up
+      player.csp = newMsp;
+      // Recalculate learnable spells
+      const magic = player.class.magic;
+      if (magic.totalSpells > 0) {
+        let learnableCount = 0;
+        for (const book of magic.books) {
+          for (const spell of book.spells) {
+            if (spell.slevel <= player.lev && !(player.spellFlags[spell.sidx] & 1)) {
+              learnableCount++;
+            }
+          }
+        }
+        player.upkeep.newSpells = learnableCount;
+      }
+    }
 
     addMessage(state, `Welcome to level ${player.lev}!`);
   }

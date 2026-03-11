@@ -13,18 +13,28 @@
  */
 
 import type { Player, PlayerState, ObjectType } from "../types/index.js";
+import type { ElementInfo } from "../types/player.js";
 import {
   Stat,
   STAT_MAX,
   STAT_RANGE,
   Skill,
   SKILL_MAX,
+  Element,
 } from "../types/index.js";
 import { BitFlag } from "../z/index.js";
 
 /** ObjectFlag values for light sources */
 const OF_LIGHT_2 = 30;
 const OF_LIGHT_3 = 31;
+
+/** ObjectFlag values for digging (DIG_1=Shovel, DIG_2=Pick, DIG_3=Special) */
+const OF_DIG_1 = 32;
+const OF_DIG_2 = 33;
+const OF_DIG_3 = 34;
+
+/** ObjectModifier index for TUNNEL */
+const OMOD_TUNNEL = 8;
 
 // ── Stat tables (from C player-calcs.c) ──
 
@@ -308,7 +318,44 @@ export function calcBonuses(player: Player): PlayerState {
         else if (item.kind?.flags?.has?.(OF_LIGHT_3)) curLight += 3;
         else curLight += 1;
       }
+
+      // Digging bonus from DIG flags (port of calc_bonuses from player-calcs.c)
+      // Check both item flags and kind flags (kind flags may not be copied to item)
+      const hasFlag = (f: number) => item.flags?.has?.(f) || item.kind?.flags?.has?.(f);
+      if (hasFlag(OF_DIG_1)) {
+        skills[Skill.DIGGING]! += Math.floor((item.weight ?? 0) / 10);
+      } else if (hasFlag(OF_DIG_2)) {
+        skills[Skill.DIGGING]! += 40 + Math.floor((item.weight ?? 0) / 5);
+      } else if (hasFlag(OF_DIG_3)) {
+        skills[Skill.DIGGING]! += 100 + Math.floor((item.weight ?? 0) / 3);
+      }
+
+      // TUNNEL modifier adds directly to digging skill
+      if (item.modifiers && item.modifiers[OMOD_TUNNEL]) {
+        skills[Skill.DIGGING]! += item.modifiers[OMOD_TUNNEL]!;
+      }
     }
+  }
+
+  // Also check inventory for DIG flags (allows carrying a digger while wielding a weapon)
+  // Only the best digger's bonus applies (not cumulative)
+  const inventory = (player as Player & { inventory?: (ObjectType | null)[] }).inventory;
+  if (inventory) {
+    let bestDigBonus = 0;
+    for (const item of inventory) {
+      if (!item) continue;
+      const invHasFlag = (f: number) => item.flags?.has?.(f) || item.kind?.flags?.has?.(f);
+      let bonus = 0;
+      if (invHasFlag(OF_DIG_3)) {
+        bonus = 100 + Math.floor((item.weight ?? 0) / 3);
+      } else if (invHasFlag(OF_DIG_2)) {
+        bonus = 40 + Math.floor((item.weight ?? 0) / 5);
+      } else if (invHasFlag(OF_DIG_1)) {
+        bonus = Math.floor((item.weight ?? 0) / 10);
+      }
+      if (bonus > bestDigBonus) bestDigBonus = bonus;
+    }
+    skills[Skill.DIGGING]! += bestDigBonus;
   }
 
   // Number of blows — calculate from weapon weight, STR, DEX, class
@@ -334,6 +381,35 @@ export function calcBonuses(player: Player): PlayerState {
 
   const pflags = player.race.pflags.clone();
   pflags.union(player.class.pflags);
+
+  // Build element resistance info from race + equipment
+  // C Angband: resistances are additive (each source adds its resLevel)
+  // resLevel: 0=normal, 1=resist (1/3 damage), 2=double resist (1/9), 3=immune
+  const elInfo: ElementInfo[] = [];
+  for (let i = 0; i < Element.MAX; i++) {
+    const raceEl = player.race.elInfo?.[i];
+    const raceRes = raceEl ? raceEl.resLevel : 0;
+    const raceFlags = raceEl ? raceEl.flags.clone() : new BitFlag(8);
+    elInfo.push({ resLevel: raceRes, flags: raceFlags } as ElementInfo);
+  }
+  // Add equipment resistances
+  if (equipment) {
+    for (let slot = 0; slot < equipment.length; slot++) {
+      const item = equipment[slot];
+      if (!item) continue;
+      // Check both item.elInfo and item.kind.elInfo (kind may have data not copied to item)
+      const itemElInfo = item.elInfo?.length ? item.elInfo : item.kind?.elInfo;
+      if (!itemElInfo) continue;
+      for (let i = 0; i < Element.MAX && i < itemElInfo.length; i++) {
+        const itemEl = itemElInfo[i];
+        if (!itemEl || itemEl.resLevel === 0) continue;
+        const cur = elInfo[i]!;
+        // Additive stacking, capped at 3 (immune)
+        const newLevel = Math.min(cur.resLevel + itemEl.resLevel, 3);
+        (cur as { resLevel: number }).resLevel = newLevel;
+      }
+    }
+  }
 
   return {
     statAdd,
@@ -361,7 +437,7 @@ export function calcBonuses(player: Player): PlayerState {
     cumberArmor: false,
     flags,
     pflags,
-    elInfo: [],
+    elInfo,
   };
 }
 
