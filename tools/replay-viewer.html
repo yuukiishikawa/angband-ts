@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Angband AI Replay Viewer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  color: #ccc;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+#header h1 { font-size: 14px; color: #e94560; }
+
+#stats-bar {
+  display: flex;
+  gap: 16px;
+  padding: 4px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.stat { white-space: nowrap; }
+.stat-label { color: #888; }
+.stat-val { color: #e2e2e2; font-weight: bold; }
+.stat-hp { color: #4ade80; }
+.stat-hp.low { color: #fbbf24; }
+.stat-hp.critical { color: #ef4444; }
+.stat-depth { color: #60a5fa; }
+.stat-cl { color: #c084fc; }
+.stat-kills { color: #f97316; }
+
+#main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+#map-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+#map {
+  font-size: 14px;
+  line-height: 16px;
+  letter-spacing: 1px;
+  white-space: pre;
+  user-select: none;
+}
+
+#event-panel {
+  width: 320px;
+  background: #111;
+  border-left: 1px solid #333;
+  overflow-y: auto;
+  padding: 8px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+#event-panel .event-item {
+  padding: 3px 0;
+  border-bottom: 1px solid #222;
+}
+.event-item .ev-turn { color: #666; }
+.event-item .ev-text { color: #aaa; }
+.event-item.active { background: #1a1a2e; }
+.event-item .ev-text.combat { color: #ef4444; }
+.event-item .ev-text.heal { color: #4ade80; }
+.event-item .ev-text.flee { color: #fbbf24; }
+.event-item .ev-text.descend { color: #60a5fa; }
+.event-item .ev-text.death { color: #ff0000; font-weight: bold; }
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #1a1a2e;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+}
+#controls button {
+  background: #333;
+  color: #fff;
+  border: 1px solid #555;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: 3px;
+}
+#controls button:hover { background: #444; }
+#controls button.active { background: #e94560; border-color: #e94560; }
+
+#timeline {
+  flex: 1;
+  height: 6px;
+  appearance: none;
+  background: #333;
+  border-radius: 3px;
+  cursor: pointer;
+}
+#timeline::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px; height: 14px;
+  background: #e94560;
+  border-radius: 50%;
+  cursor: pointer;
+}
+#frame-info { font-size: 11px; color: #888; min-width: 100px; text-align: right; }
+
+#speed-display { font-size: 11px; color: #888; }
+
+#msg-bar {
+  padding: 4px 12px;
+  background: #111;
+  font-size: 11px;
+  color: #888;
+  border-top: 1px solid #222;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#drop-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(233,69,96,0.15);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; pointer-events: none; opacity: 0;
+  transition: opacity 0.2s;
+}
+#drop-overlay.active { opacity: 1; }
+#drop-overlay .inner {
+  border: 3px dashed #e94560;
+  border-radius: 12px;
+  padding: 40px 60px;
+  color: #e94560;
+  font-size: 18px;
+}
+
+/* Tile colors */
+.t-wall { color: #666; }
+.t-floor { color: #444; }
+.t-floor-lit { color: #776644; }
+.t-door-c { color: #c08040; }
+.t-door-o { color: #806030; }
+.t-stair-up { color: #fff; }
+.t-stair-down { color: #fff; font-weight: bold; }
+.t-player { color: #fff; background: #e94560; font-weight: bold; }
+.t-monster { color: #ff6b6b; }
+.t-item { color: #ffd700; }
+.t-unknown { color: #222; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Angband AI Replay</h1>
+  <div id="speed-display">Speed: 10 fps</div>
+</div>
+
+<div id="stats-bar">
+  <span class="stat"><span class="stat-label">Turn </span><span class="stat-val" id="s-turn">0</span></span>
+  <span class="stat"><span class="stat-label">DL</span><span class="stat-val stat-depth" id="s-depth">0</span></span>
+  <span class="stat"><span class="stat-label">CL</span><span class="stat-val stat-cl" id="s-cl">1</span></span>
+  <span class="stat"><span class="stat-label">HP </span><span class="stat-val stat-hp" id="s-hp">0/0</span></span>
+  <span class="stat"><span class="stat-label">AC </span><span class="stat-val" id="s-ac">0</span></span>
+  <span class="stat"><span class="stat-label">Food </span><span class="stat-val" id="s-food">0</span></span>
+  <span class="stat"><span class="stat-label">Kills </span><span class="stat-val stat-kills" id="s-kills">-</span></span>
+</div>
+
+<div id="main-area">
+  <div id="map-container">
+    <div id="map">Drag &amp; drop a .jsonl replay file here, or click "Load" to select</div>
+  </div>
+  <div id="event-panel">
+    <div style="color:#666; padding:8px;">Events will appear here</div>
+  </div>
+</div>
+
+<div id="msg-bar" id="msg-bar">&nbsp;</div>
+
+<div id="controls">
+  <button id="btn-load" onclick="document.getElementById('file-input').click()">Load</button>
+  <input type="file" id="file-input" accept=".jsonl" style="display:none">
+  <button id="btn-prev" onclick="stepFrame(-1)">&lt;</button>
+  <button id="btn-play" onclick="togglePlay()">Play</button>
+  <button id="btn-next" onclick="stepFrame(1)">&gt;</button>
+  <button id="btn-slower" onclick="changeSpeed(-1)">-</button>
+  <button id="btn-faster" onclick="changeSpeed(1)">+</button>
+  <input type="range" id="timeline" min="0" max="0" value="0" oninput="seekFrame(this.value)">
+  <span id="frame-info">0 / 0</span>
+</div>
+
+<div id="drop-overlay"><div class="inner">Drop .jsonl file here</div></div>
+
+<script>
+// ── State ──
+let frames = [];
+let currentFrame = 0;
+let playing = false;
+let playTimer = null;
+let fps = 10;
+let totalKills = 0; // track kills across frames
+
+// ── Feat constants ──
+const FEAT = { FLOOR: 1, CLOSED_DOOR: 2, OPEN_DOOR: 3, UP_STAIR: 5, DOWN_STAIR: 6, GRANITE: 21 };
+
+// ── Tile rendering ──
+function featChar(f) {
+  switch(f) {
+    case FEAT.FLOOR: return '.';
+    case FEAT.CLOSED_DOOR: return '+';
+    case FEAT.OPEN_DOOR: return "'";
+    case FEAT.UP_STAIR: return '<';
+    case FEAT.DOWN_STAIR: return '>';
+    case FEAT.GRANITE: return '#';
+    default: return f > 10 ? '#' : '.';
+  }
+}
+function featClass(f, lit) {
+  switch(f) {
+    case FEAT.GRANITE: return 't-wall';
+    case FEAT.FLOOR: return lit ? 't-floor-lit' : 't-floor';
+    case FEAT.CLOSED_DOOR: return 't-door-c';
+    case FEAT.OPEN_DOOR: return 't-door-o';
+    case FEAT.UP_STAIR: return 't-stair-up';
+    case FEAT.DOWN_STAIR: return 't-stair-down';
+    default: return f > 10 ? 't-wall' : 't-floor';
+  }
+}
+
+// ── Render map ──
+const VIEW_W = 80, VIEW_H = 40;
+
+function renderMap(frame) {
+  const { px, py, tiles, mons } = frame;
+  const halfW = Math.floor(VIEW_W / 2), halfH = Math.floor(VIEW_H / 2);
+
+  // Tiles use relative coords: [dx, dy, feat, flags]
+  // flags: bit0=lit, bit1=hasObj
+  const tileMap = new Map();
+  for (const t of tiles) {
+    tileMap.set(`${t[0]},${t[1]}`, t);
+  }
+  // Monsters also relative: [dx, dy, char, hp, maxhp, name, level]
+  const monMap = new Map();
+  for (const m of mons) {
+    monMap.set(`${m[0]},${m[1]}`, m);
+  }
+
+  let html = '';
+  for (let dy = -halfH; dy < halfH; dy++) {
+    for (let dx = -halfW; dx < halfW; dx++) {
+      const key = `${dx},${dy}`;
+
+      if (dx === 0 && dy === 0) {
+        html += '<span class="t-player">@</span>';
+        continue;
+      }
+
+      const mon = monMap.get(key);
+      if (mon) {
+        const mChar = mon[2] || '?';
+        const mName = mon[5] || '';
+        const mLvl = mon[6] || 0;
+        const hpPct = mon[4] > 0 ? mon[3] / mon[4] : 1;
+        const color = hpPct < 0.3 ? '#ff4444' : hpPct < 0.7 ? '#ff8844' : '#ff6b6b';
+        html += `<span style="color:${color}" title="${mName} Lv${mLvl} HP:${mon[3]}/${mon[4]}">${mChar}</span>`;
+        continue;
+      }
+
+      const tile = tileMap.get(key);
+      if (tile) {
+        const feat = tile[2], flags = tile[3];
+        const lit = flags & 1, hasObj = flags & 2;
+        if (hasObj) {
+          html += '<span class="t-item">*</span>';
+        } else {
+          html += `<span class="${featClass(feat, lit)}">${featChar(feat)}</span>`;
+        }
+      } else {
+        // Unknown tiles within view = granite wall (omitted for compression)
+        const inView = Math.abs(dx) <= 30 && Math.abs(dy) <= 15;
+        html += inView
+          ? '<span class="t-wall">#</span>'
+          : '<span class="t-unknown"> </span>';
+      }
+    }
+    html += '\n';
+  }
+  return html;
+}
+
+// ── Update display ──
+function showFrame(idx) {
+  if (idx < 0 || idx >= frames.length) return;
+  currentFrame = idx;
+  const f = frames[idx];
+
+  document.getElementById('map').innerHTML = renderMap(f);
+
+  // Stats
+  document.getElementById('s-turn').textContent = f.t;
+  document.getElementById('s-depth').textContent = f.d;
+  document.getElementById('s-cl').textContent = f.cl;
+
+  const hpEl = document.getElementById('s-hp');
+  const hpPct = f.mhp > 0 ? f.hp / f.mhp : 1;
+  hpEl.textContent = `${f.hp}/${f.mhp}`;
+  hpEl.className = 'stat-val stat-hp' + (hpPct < 0.3 ? ' critical' : hpPct < 0.6 ? ' low' : '');
+
+  document.getElementById('s-ac').textContent = f.ac;
+  document.getElementById('s-food').textContent = f.food;
+
+  // Track kills from events
+  if (f.ev && (f.ev.includes('撃破') || f.ev.includes('戦闘'))) {
+    // Count kill events up to this frame
+  }
+  // Count kill events
+  let kills = 0;
+  for (let i = 0; i <= idx; i++) {
+    if (frames[i].ev && (frames[i].ev.includes('撃破') || frames[i].ev.includes('戦闘'))) kills++;
+  }
+  document.getElementById('s-kills').textContent = kills;
+
+  // Messages
+  document.getElementById('msg-bar').textContent = f.msg || ' ';
+
+  // Timeline
+  document.getElementById('timeline').value = idx;
+  document.getElementById('frame-info').textContent = `${idx + 1} / ${frames.length}`;
+
+  // Highlight current event
+  highlightEvent(idx);
+}
+
+// ── Events panel ──
+function buildEventPanel() {
+  const panel = document.getElementById('event-panel');
+  let html = '';
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    if (!f.ev) continue;
+    let evClass = '';
+    if (f.ev.includes('死亡')) evClass = 'death';
+    else if (f.ev.includes('撃破') || f.ev.includes('戦闘')) evClass = 'combat';
+    else if (f.ev.includes('回復')) evClass = 'heal';
+    else if (f.ev.includes('逃走') || f.ev.includes('脱出') || f.ev.includes('回避')) evClass = 'flee';
+    else if (f.ev.includes('降下')) evClass = 'descend';
+
+    html += `<div class="event-item" data-frame="${i}" onclick="seekFrame(${i})">
+      <span class="ev-turn">T${f.t} DL${f.d}</span>
+      <span class="ev-text ${evClass}">${truncate(f.ev, 60)}</span>
+    </div>`;
+  }
+  panel.innerHTML = html || '<div style="color:#666;padding:8px;">No events</div>';
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.substring(0, n) + '...' : s;
+}
+
+function highlightEvent(frameIdx) {
+  document.querySelectorAll('.event-item.active').forEach(e => e.classList.remove('active'));
+  // Find the closest event at or before this frame
+  let closest = null;
+  document.querySelectorAll('.event-item').forEach(e => {
+    const fi = parseInt(e.dataset.frame);
+    if (fi <= frameIdx) closest = e;
+    if (fi === frameIdx) { e.classList.add('active'); closest = e; }
+  });
+  if (closest) closest.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// ── Controls ──
+function togglePlay() {
+  playing = !playing;
+  document.getElementById('btn-play').textContent = playing ? 'Pause' : 'Play';
+  document.getElementById('btn-play').classList.toggle('active', playing);
+  if (playing) {
+    playTimer = setInterval(() => {
+      if (currentFrame < frames.length - 1) {
+        showFrame(currentFrame + 1);
+      } else {
+        togglePlay(); // auto-pause at end
+      }
+    }, 1000 / fps);
+  } else {
+    clearInterval(playTimer);
+  }
+}
+
+function stepFrame(delta) {
+  if (playing) togglePlay();
+  showFrame(currentFrame + delta);
+}
+
+function seekFrame(idx) {
+  idx = parseInt(idx);
+  if (playing) togglePlay();
+  showFrame(idx);
+}
+
+function changeSpeed(delta) {
+  const speeds = [1, 2, 5, 10, 20, 30, 60];
+  let cur = speeds.indexOf(fps);
+  if (cur === -1) cur = 3;
+  cur = Math.max(0, Math.min(speeds.length - 1, cur + delta));
+  fps = speeds[cur];
+  document.getElementById('speed-display').textContent = `Speed: ${fps} fps`;
+  if (playing) {
+    clearInterval(playTimer);
+    playTimer = setInterval(() => {
+      if (currentFrame < frames.length - 1) {
+        showFrame(currentFrame + 1);
+      } else {
+        togglePlay();
+      }
+    }, 1000 / fps);
+  }
+}
+
+// ── File loading ──
+function loadReplay(text) {
+  frames = text.trim().split('\n').map(line => {
+    try { return JSON.parse(line); }
+    catch { return null; }
+  }).filter(Boolean);
+
+  if (frames.length === 0) {
+    alert('No valid frames found in file');
+    return;
+  }
+
+  document.getElementById('timeline').max = frames.length - 1;
+  buildEventPanel();
+  showFrame(0);
+  document.getElementById('header').querySelector('h1').textContent =
+    `Angband AI Replay — ${frames.length} frames`;
+}
+
+// File input
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = () => loadReplay(reader.result);
+    reader.readAsText(file);
+  }
+});
+
+// Drag & drop
+document.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.add('active');
+});
+document.addEventListener('dragleave', (e) => {
+  if (e.relatedTarget === null) {
+    document.getElementById('drop-overlay').classList.remove('active');
+  }
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = () => loadReplay(reader.result);
+    reader.readAsText(file);
+  }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowRight' || e.key === 'l') stepFrame(1);
+  else if (e.key === 'ArrowLeft' || e.key === 'h') stepFrame(-1);
+  else if (e.key === 'ArrowUp' || e.key === 'k') stepFrame(-10);
+  else if (e.key === 'ArrowDown' || e.key === 'j') stepFrame(10);
+  else if (e.key === '+' || e.key === '=') changeSpeed(1);
+  else if (e.key === '-') changeSpeed(-1);
+  else if (e.key === 'Home') seekFrame(0);
+  else if (e.key === 'End') seekFrame(frames.length - 1);
+});
+
+// Auto-load from URL parameter
+const urlParams = new URLSearchParams(window.location.search);
+const autoFile = urlParams.get('file');
+if (autoFile) {
+  fetch(autoFile)
+    .then(r => r.text())
+    .then(t => loadReplay(t))
+    .catch(e => console.error('Auto-load failed:', e));
+}
+</script>
+</body>
+</html>

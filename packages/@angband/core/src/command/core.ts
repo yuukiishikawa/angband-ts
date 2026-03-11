@@ -21,7 +21,7 @@ import { getInventoryItem } from "../object/index.js";
 import { cmdWalk, cmdRun, cmdOpen, cmdClose, cmdTunnel, cmdDisarm, cmdSearch, cmdGoUp, cmdGoDown, directionOffset } from "./movement.js";
 import { cmdAttack, cmdFire, cmdThrow } from "./combat.js";
 import { cmdEat, cmdQuaff, cmdRead, cmdAim, cmdZap, cmdPickup, cmdDrop, cmdEquip, cmdUnequip, cmdRest, cmdInscribe, cmdUseItem } from "./item.js";
-import { cmdCast } from "./magic.js";
+import { cmdCast, cmdStudy } from "./magic.js";
 
 // ── Constants ──
 
@@ -63,6 +63,7 @@ export const enum CommandType {
   GO_DOWN = 25,
   INSCRIBE = 26,
   UNINSCRIBE = 27,
+  STUDY = 28,
 }
 
 // ── Command result ──
@@ -246,6 +247,11 @@ interface UninscribeCommand {
   readonly itemIndex: number;
 }
 
+interface StudyCommand {
+  readonly type: CommandType.STUDY;
+  readonly spellIndex: number;
+}
+
 /**
  * Base command fields shared by all commands.
  * nrepeat is an optional repeat count (numeric prefix, e.g. "5s" = search 5 times).
@@ -289,6 +295,7 @@ export type GameCommand = (
   | GoDownCommand
   | InscribeCommand
   | UninscribeCommand
+  | StudyCommand
 ) & CommandBase;
 
 // ── Command info table ──
@@ -331,6 +338,7 @@ export const COMMAND_INFO: Record<CommandType, CommandInfo> = {
   [CommandType.GO_DOWN]:    { verb: "go down",    repeatAllowed: false, canUseEnergy: true },
   [CommandType.INSCRIBE]:   { verb: "inscribe",   repeatAllowed: false, canUseEnergy: false },
   [CommandType.UNINSCRIBE]: { verb: "uninscribe", repeatAllowed: false, canUseEnergy: false },
+  [CommandType.STUDY]:      { verb: "study",      repeatAllowed: false, canUseEnergy: true },
 };
 
 /**
@@ -426,6 +434,9 @@ export function executeCommand(
     // Magic
     case CommandType.CAST:
       return cmdCast(player, cmd.spellIndex, cmd.direction, rng);
+
+    case CommandType.STUDY:
+      return cmdStudy(player, cmd.spellIndex);
 
     // UI-only (handled by game bridge, not core)
     case CommandType.BROWSE:
