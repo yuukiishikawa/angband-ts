@@ -45,7 +45,8 @@ import { Stat, TimedEffect } from "../types/player.js";
 import type { ElementInfo } from "../types/player.js";
 import { Element } from "../types/object.js";
 import { BitFlag } from "../z/bitflag.js";
-import { createStore, initStoreStock, StoreType, STORE_TYPE_MAX } from "../store/store.js";
+import { MonsterRaceFlag, MonsterSpellFlag } from "../types/monster.js";
+import { createStore, initStoreStock, StoreType, STORE_TYPE_MAX, storeBuy, storeSell, storeGetPrice } from "../store/store.js";
 import type { Store } from "../store/store.js";
 import type { GameCommand } from "../command/core.js";
 import { CommandType } from "../command/core.js";
@@ -333,25 +334,102 @@ function serializeVisibleMap(state: GameState): {
   return { tiles, width: chunk.width, height: chunk.height };
 }
 
+// Breath spell flag → element name mapping for AI awareness
+const BREATH_ELEMENT_MAP: [number, string][] = [
+  [MonsterSpellFlag.BR_ACID, "ACID"], [MonsterSpellFlag.BR_ELEC, "ELEC"],
+  [MonsterSpellFlag.BR_FIRE, "FIRE"], [MonsterSpellFlag.BR_COLD, "COLD"],
+  [MonsterSpellFlag.BR_POIS, "POIS"], [MonsterSpellFlag.BR_NETH, "NETHER"],
+  [MonsterSpellFlag.BR_LIGHT, "LIGHT"], [MonsterSpellFlag.BR_DARK, "DARK"],
+  [MonsterSpellFlag.BR_SOUN, "SOUND"], [MonsterSpellFlag.BR_CHAO, "CHAOS"],
+  [MonsterSpellFlag.BR_DISE, "DISEN"], [MonsterSpellFlag.BR_NEXU, "NEXUS"],
+  [MonsterSpellFlag.BR_SHAR, "SHARD"], [MonsterSpellFlag.BR_PLAS, "ELEC"],
+  [MonsterSpellFlag.BR_MANA, "MANA"],
+];
+
+// Ball/bolt spell flag → element name mapping
+const SPELL_ELEMENT_MAP: [number, string][] = [
+  [MonsterSpellFlag.BA_ACID, "ACID"], [MonsterSpellFlag.BA_ELEC, "ELEC"],
+  [MonsterSpellFlag.BA_FIRE, "FIRE"], [MonsterSpellFlag.BA_COLD, "COLD"],
+  [MonsterSpellFlag.BA_POIS, "POIS"], [MonsterSpellFlag.BA_NETH, "NETHER"],
+  [MonsterSpellFlag.BO_ACID, "ACID"], [MonsterSpellFlag.BO_ELEC, "ELEC"],
+  [MonsterSpellFlag.BO_FIRE, "FIRE"], [MonsterSpellFlag.BO_COLD, "COLD"],
+  [MonsterSpellFlag.BO_POIS, "POIS"], [MonsterSpellFlag.BO_NETH, "NETHER"],
+];
+
+// Summoning spell flags
+const SUMMON_FLAGS = [
+  MonsterSpellFlag.S_KIN, MonsterSpellFlag.S_HI_DEMON,
+  MonsterSpellFlag.S_MONSTER, MonsterSpellFlag.S_MONSTERS,
+  MonsterSpellFlag.S_ANIMAL, MonsterSpellFlag.S_SPIDER,
+  MonsterSpellFlag.S_HOUND, MonsterSpellFlag.S_HYDRA,
+  MonsterSpellFlag.S_DEMON, MonsterSpellFlag.S_UNDEAD,
+  MonsterSpellFlag.S_DRAGON, MonsterSpellFlag.S_HI_UNDEAD,
+  MonsterSpellFlag.S_HI_DRAGON, MonsterSpellFlag.S_WRAITH,
+  MonsterSpellFlag.S_UNIQUE,
+];
+
 function serializeMonsters(state: GameState): {
   midx: number; name: string; x: number; y: number;
   hp: number; maxhp: number; speed: number; level: number;
   distance: number;
+  isUnique: boolean; isBreeder: boolean;
+  breathElements: string[]; spellElements: string[];
+  hasSummon: boolean; freqSpell: number; freqInnate: number;
+  hasPassWall: boolean; isEvil: boolean; isUndead: boolean;
+  isDragon: boolean; isDemon: boolean;
 }[] {
   const p = state.player;
   return (state.chunk.monsters ?? [])
     .filter((m): m is NonNullable<typeof m> => m != null && m.hp > 0)
-    .map((m) => ({
-      midx: m.midx,
-      name: m.race?.name ?? "unknown",
-      x: m.grid.x,
-      y: m.grid.y,
-      hp: m.hp,
-      maxhp: m.maxhp,
-      speed: m.mspeed ?? 0,
-      level: m.race?.level ?? 0,
-      distance: Math.max(Math.abs(m.grid.x - p.grid.x), Math.abs(m.grid.y - p.grid.y)),
-    }))
+    .map((m) => {
+      const race = m.race;
+      const flags = race?.flags;
+      const sf = race?.spellFlags;
+
+      // Extract breath elements
+      const breathElements: string[] = [];
+      if (sf) {
+        for (const [flag, elem] of BREATH_ELEMENT_MAP) {
+          if (sf.has(flag)) breathElements.push(elem);
+        }
+      }
+
+      // Extract spell elements
+      const spellElements: string[] = [];
+      if (sf) {
+        for (const [flag, elem] of SPELL_ELEMENT_MAP) {
+          if (sf.has(flag)) spellElements.push(elem);
+        }
+      }
+
+      // Check summoning
+      const hasSummon = sf ? SUMMON_FLAGS.some(f => sf.has(f)) : false;
+
+      return {
+        midx: m.midx,
+        name: race?.name ?? "unknown",
+        x: m.grid.x,
+        y: m.grid.y,
+        hp: m.hp,
+        maxhp: m.maxhp,
+        speed: m.mspeed ?? 0,
+        level: race?.level ?? 0,
+        distance: Math.max(Math.abs(m.grid.x - p.grid.x), Math.abs(m.grid.y - p.grid.y)),
+        // New fields for AI awareness
+        isUnique: flags ? flags.has(MonsterRaceFlag.UNIQUE) : false,
+        isBreeder: flags ? flags.has(MonsterRaceFlag.MULTIPLY) : false,
+        breathElements,
+        spellElements,
+        hasSummon,
+        freqSpell: race?.freqSpell ?? 0,
+        freqInnate: race?.freqInnate ?? 0,
+        hasPassWall: flags ? flags.has(MonsterRaceFlag.PASS_WALL) : false,
+        isEvil: flags ? flags.has(MonsterRaceFlag.EVIL) : false,
+        isUndead: flags ? flags.has(MonsterRaceFlag.UNDEAD) : false,
+        isDragon: flags ? flags.has(MonsterRaceFlag.DRAGON) : false,
+        isDemon: flags ? flags.has(MonsterRaceFlag.DEMON) : false,
+      };
+    })
     .filter((m) => m.distance <= 20)
     .sort((a, b) => a.distance - b.distance);
 }
@@ -557,7 +635,24 @@ function serializeState(state: GameState) {
     map: serializeVisibleMap(state),
     monsters: serializeMonsters(state),
     messages: state.messages.slice(-20).map((m) => m.text ?? String(m)),
+    stores: state.depth === 0 ? serializeStores(state) : undefined,
   };
+}
+
+function serializeStores(state: GameState) {
+  if (!state.stores) return undefined;
+  return state.stores.map((store, i) => ({
+    type: i,
+    name: store.name,
+    stock: store.stock.map((item, idx) => ({
+      index: idx,
+      name: item.kind?.name ?? "unknown",
+      tval: item.kind?.tval ?? 0,
+      sval: item.kind?.sval ?? 0,
+      price: storeGetPrice(store, item, false),
+      ...serializeItemExtra(item),
+    })),
+  }));
 }
 
 // ── Validate incoming commands ──
@@ -757,6 +852,74 @@ class AIServer {
         if (!this.state) { res.writeHead(503); res.end("Game not ready"); return; }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(serializeState(this.state)));
+        return;
+      }
+
+      // ── /buy endpoint — buy items from stores (only at depth 0) ──
+      if (url.pathname === "/buy" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        req.on("end", () => {
+          if (!this.state) { res.writeHead(503); res.end("Game not ready"); return; }
+          if (this.state.depth !== 0) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Must be in town (depth 0) to buy" }));
+            return;
+          }
+          let parsed: { storeType: number; itemIndex: number };
+          try { parsed = JSON.parse(body); } catch {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Invalid JSON" }));
+            return;
+          }
+          const store = this.state.stores?.[parsed.storeType];
+          if (!store) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `Invalid store type: ${parsed.storeType}` }));
+            return;
+          }
+          const result = storeBuy(store, this.state.player, parsed.itemIndex);
+          res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ...result, state: serializeState(this.state) }));
+        });
+        return;
+      }
+
+      // ── /sell endpoint — sell items to stores (only at depth 0) ──
+      if (url.pathname === "/sell" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        req.on("end", () => {
+          if (!this.state) { res.writeHead(503); res.end("Game not ready"); return; }
+          if (this.state.depth !== 0) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Must be in town (depth 0) to sell" }));
+            return;
+          }
+          let parsed: { storeType: number; itemSlot: number };
+          try { parsed = JSON.parse(body); } catch {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Invalid JSON" }));
+            return;
+          }
+          const store = this.state.stores?.[parsed.storeType];
+          if (!store) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `Invalid store type: ${parsed.storeType}` }));
+            return;
+          }
+          // Find the item in player inventory by slot index
+          const inv = (this.state.player as any).inventory ?? [];
+          const item = inv[parsed.itemSlot];
+          if (!item) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `No item at slot ${parsed.itemSlot}` }));
+            return;
+          }
+          const result = storeSell(store, this.state.player, item);
+          res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ...result, state: serializeState(this.state) }));
+        });
         return;
       }
 
