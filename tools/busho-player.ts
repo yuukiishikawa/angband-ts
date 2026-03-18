@@ -864,6 +864,12 @@ function getAreaHash(tiles: any[], px: number, py: number): string {
   return `${reachable.length}:${reachable.slice(0, 3).join(";")}`;
 }
 
+// ── 退避モード (逃走後のHP回復優先) ──
+let retreatMode = false;        // 退避中フラグ
+let retreatStartTurn = 0;       // 退避開始ターン
+const RETREAT_HP_THRESHOLD = 0.8; // HP80%以上で退避解除
+const RETREAT_MAX_TURNS = 30;    // 最大30ターンで強制解除
+
 // ── 探索効率追跡 ──
 let explorationRateWindow: number[] = []; // 直近の探索率（200アクション毎）
 
@@ -1096,7 +1102,7 @@ async function playGame() {
       visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
       killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
       levelEntryDetected = false; unreachableItems.clear();
-      teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; supplyWoRUsedThisLevel = false; fleeCountByMonster.clear(); forceFightMonsters.clear();
+      teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; supplyWoRUsedThisLevel = false; fleeCountByMonster.clear(); forceFightMonsters.clear(); retreatMode = false;
       if (state.depth > maxDepthReached) maxDepthReached = state.depth;
       lastKnownDepth = state.depth;
 
@@ -1301,6 +1307,44 @@ async function playGame() {
     const canCastSpells = spells.length > 0 && sp > 0;
     const newSpellSlots = p.newSpells ?? 0;
 
+    // === 退避モード管理 ===
+    if (retreatMode) {
+      const retreatTurns = state.turn - retreatStartTurn;
+      if (hpPct >= RETREAT_HP_THRESHOLD || retreatTurns > RETREAT_MAX_TURNS) {
+        retreatMode = false;
+      }
+    }
+
+    // === 退避モード: HP回復優先（逃走直後） ===
+    // 逃走後はHPを回復しきるまで戦闘を避け、回復に専念する
+    if (retreatMode && monsters.filter((m: any) => m.distance <= 1).length === 0) {
+      if (hpPct < RETREAT_HP_THRESHOLD) {
+        // 回復スペル
+        if (canCastSpells) {
+          const healSpell = findBestHealSpell(spells, p.level, sp, false);
+          if (healSpell) {
+            spellsUsed++; healingsUsed++;
+            state = await sendCommand({ type: CMD.CAST, spellIndex: healSpell.index, direction: 5 });
+            continue;
+          }
+        }
+        // 回復ポーション（段階的）
+        const healSlot = findTieredHealingPotion(inv, hpPct);
+        if (healSlot !== null) {
+          healingsUsed++;
+          state = await sendCommand({ type: CMD.QUAFF, itemIndex: healSlot });
+          continue;
+        }
+        // 回復手段なし → REST（敵が近くにいなければ）
+        if (monsters.filter((m: any) => m.distance <= 4).length === 0) {
+          state = await sendCommand({ type: CMD.REST, turns: 5 });
+          continue;
+        }
+        // 敵が中距離にいる → 退避解除して通常行動
+        retreatMode = false;
+      }
+    }
+
     // === 定期ログ + 探索効率追跡 ===
     if (actionCount % 200 === 0) {
       const passableTiles = tiles.filter((t: any) => PASSABLE_FEATS.has(t.feat)).length;
@@ -1440,7 +1484,7 @@ async function playGame() {
             const onDown = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
             const onUp = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.UP_STAIR);
             if (onDown) {
-              fleeAttempts++;
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
               state = await sendCommand({ type: CMD.GO_DOWN });
               visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
               killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
@@ -1450,7 +1494,7 @@ async function playGame() {
               continue;
             }
             if (onUp && state.depth > 1) {
-              fleeAttempts++;
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
               state = await sendCommand({ type: CMD.GO_UP });
               visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
               killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
@@ -1462,21 +1506,22 @@ async function playGame() {
           // Teleportで距離を取る
           const teleSlotP = findTeleportScroll(inv);
           if (teleSlotP !== null) {
-            fleeAttempts++;
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
             state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotP });
             stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
             continue;
           }
         }
 
-        // パスウォール持ちからはPhase Doorでは逃げられない → Teleport優先
+        // パスウォール持ち or DL18+ではPhase Doorでは追いつかれる → Teleport優先
         const hasPassWallChaser = nearbyEnemies.some((m: any) => m.hasPassWall);
+        const preferTeleport = hasPassWallChaser || state.depth >= 18;
 
         // 逃走スペル (Phase Door/Teleport Self)
         if (canCastSpells) {
           const escSpell = findCastableSpell(spells, ESCAPE_SPELLS, p.level, sp);
           if (escSpell) {
-            fleeAttempts++;
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
             spellsUsed++;
             addLesson(state.turn, state.depth, "魔法逃走",
               `HP${Math.round(hpPct*100)}%、${escSpell.name}で逃走`);
@@ -1487,14 +1532,14 @@ async function playGame() {
             continue;
           }
         }
-        // パスウォール持ちの場合はTeleport優先 (Phase Doorでは短距離しか逃げられず追いつかれる)
-        if (hasPassWallChaser) {
-          const teleSlotPW = findTeleportScroll(inv);
-          if (teleSlotPW !== null) {
-            fleeAttempts++;
-            addLesson(state.turn, state.depth, "パスウォール逃走",
-              `HP${Math.round(hpPct*100)}%、パスウォール敵。Teleportで大距離脱出`);
-            state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotPW });
+        // DL18+ or パスウォール持ち → Teleport優先 (Phase Doorは短距離で再遭遇しやすい)
+        if (preferTeleport) {
+          const teleSlotDeep = findTeleportScroll(inv);
+          if (teleSlotDeep !== null) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "深層逃走",
+              `HP${Math.round(hpPct*100)}%、DL${state.depth}。Teleportで確実に距離を取る`);
+            state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotDeep });
             stuckCount = 0; noProgressCount = 0;
             visited.clear(); lastVisitedSize = 0;
             continue;
@@ -1502,7 +1547,7 @@ async function playGame() {
         }
         const phaseSlot = findPhaseScroll(inv);
         if (phaseSlot !== null) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "早期逃走",
             `HP${Math.round(hpPct*100)}%、敵${nearbyEnemies.length}体(dist<=3)。DL${state.depth}では早期逃走`);
           state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
@@ -1510,7 +1555,7 @@ async function playGame() {
         }
         const teleSlot = findTeleportScroll(inv);
         if (teleSlot !== null) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "緊急逃走",
             `HP危険域、Teleportationで脱出。生存最優先`);
           state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot });
@@ -1544,7 +1589,7 @@ async function playGame() {
       // 回復薬なし → 逃走
       const phaseSlot = findPhaseScroll(inv);
       if (phaseSlot !== null && monsters.length > 0) {
-        fleeAttempts++;
+        fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
         addLesson(state.turn, state.depth, "逃走",
           `HP${Math.round(hpPct*100)}%、回復薬なし、敵${monsters.length}体。Phase Doorで退避`);
         state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
@@ -1552,7 +1597,7 @@ async function playGame() {
       }
       const teleSlot2 = findTeleportScroll(inv);
       if (teleSlot2 !== null && monsters.length > 0) {
-        fleeAttempts++;
+        fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
         state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot2 });
         stuckCount = 0; noProgressCount = 0;
         visited.clear(); lastVisitedSize = 0;
@@ -1676,7 +1721,7 @@ async function playGame() {
         // まずTeleportで距離を取る (WoRより安い)
         const teleSlotChaser = findTeleportScroll(inv);
         if (teleSlotChaser !== null) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "追跡者脱出",
             `${dangerMon.name}(Lv${dangerMon.level})から${monFleeCount+1}回目。Teleportで脱出`);
           state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotChaser });
@@ -1686,7 +1731,7 @@ async function playGame() {
         // Teleportなし → 階段で脱出
         const onDownStair = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
         if (onDownStair) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "追跡者脱出",
             `${dangerMon.name}から${monFleeCount+1}回目。階段で脱出`);
           state = await sendCommand({ type: CMD.GO_DOWN });
@@ -1701,7 +1746,7 @@ async function playGame() {
         if (monFleeCount >= 5 && state.depth > 0 && !(p.wordRecall > 0)) {
           const recallSlot = findRecallScroll(inv);
           if (recallSlot !== null) {
-            fleeAttempts++;
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
             addLesson(state.turn, state.depth, "追跡者脱出",
               `${dangerMon.name}から${monFleeCount+1}回目。WoRで帰還`);
             state = await sendCommand({ type: CMD.READ, itemIndex: recallSlot });
@@ -1714,7 +1759,7 @@ async function playGame() {
       if (canCastSpells) {
         const escSpell = findCastableSpell(spells, ESCAPE_SPELLS, p.level, sp);
         if (escSpell) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           spellsUsed++;
           const breathInfo = dangerMon.breathElements?.length ? ` BR:${dangerMon.breathElements.join("/")}` : "";
           const summonInfo = dangerMon.hasSummon ? " +SUM" : "";
@@ -1727,7 +1772,7 @@ async function playGame() {
       }
       const phaseSlot = findPhaseScroll(inv);
       if (phaseSlot !== null) {
-        fleeAttempts++;
+        fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
         addLesson(state.turn, state.depth, "危険敵回避",
           `${dangerMon.name}(Lv${dangerMon.level},spd${dangerMon.speed})接近。Phase Doorで退避`);
         state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
@@ -1735,7 +1780,7 @@ async function playGame() {
       }
       const teleSlot = findTeleportScroll(inv);
       if (teleSlot !== null) {
-        fleeAttempts++;
+        fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
         addLesson(state.turn, state.depth, "危険敵回避",
           `${dangerMon.name}(Lv${dangerMon.level})接近。Teleportで脱出`);
         state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot });
@@ -1801,7 +1846,7 @@ async function playGame() {
             const onDown = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
             const onUp = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.UP_STAIR);
             if (onDown) {
-              fleeAttempts++;
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
               state = await sendCommand({ type: CMD.GO_DOWN });
               visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
               killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
@@ -1810,7 +1855,7 @@ async function playGame() {
               continue;
             }
             if (onUp && state.depth > 1) {
-              fleeAttempts++;
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
               state = await sendCommand({ type: CMD.GO_UP });
               visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
               killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
@@ -1828,7 +1873,7 @@ async function playGame() {
           if (adjFleeCount < 10) {
             const teleSlot = findTeleportScroll(inv);
             if (teleSlot !== null) {
-              fleeAttempts++;
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
               addLesson(state.turn, state.depth, "追跡者包囲脱出",
                 `${target.name}から${adjFleeCount+1}回目。Teleportで完全脱出`);
               state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot });
@@ -1840,7 +1885,7 @@ async function playGame() {
 
         const phaseSlot = findPhaseScroll(inv);
         if (phaseSlot !== null) {
-          fleeAttempts++;
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "包囲逃走",
             `隣接敵${adjacentMonsters.length}体、HP${Math.round(hpPct*100)}%。包囲は危険、即逃走`);
           state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
@@ -1851,7 +1896,7 @@ async function playGame() {
         if (hpPct < teleFleePct) {
           const teleSlot = findTeleportScroll(inv);
           if (teleSlot !== null) {
-            fleeAttempts++;
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
             addLesson(state.turn, state.depth, "緊急包囲脱出",
               `隣接敵${adjacentMonsters.length}体、HP${Math.round(hpPct*100)}%。Teleportで緊急脱出`);
             state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot });
@@ -1951,10 +1996,11 @@ async function playGame() {
 
     // === 優先度5: 接近中の敵への対応 (BFS到達可能 + 安全な敵のみ) ===
     // noProgressCount高い時はスキップ (脱出を優先)
+    // 退避モード中はスキップ (HP回復を優先、敵に近づかない)
     const nearbyMonsters = monsters.filter((m: any) =>
       m.distance <= 6 && !isDangerousMonster(m, p.level, state.depth, playerResists)
     );
-    if (nearbyMonsters.length > 0 && stuckCount < 5 && noProgressCount < 50) {
+    if (nearbyMonsters.length > 0 && stuckCount < 5 && noProgressCount < 50 && !retreatMode) {
       const closest = nearbyMonsters.sort((a: any, b: any) => a.distance - b.distance)[0];
 
       // 接近中に武器スワップ（距離2-3で余裕がある時）
