@@ -377,6 +377,8 @@ function serializeMonsters(state: GameState): {
   hasSummon: boolean; freqSpell: number; freqInnate: number;
   hasPassWall: boolean; isEvil: boolean; isUndead: boolean;
   isDragon: boolean; isDemon: boolean;
+  isAnimal: boolean; isOrc: boolean; isTroll: boolean; isGiant: boolean;
+  imAcid: boolean; imElec: boolean; imFire: boolean; imCold: boolean; imPois: boolean;
 }[] {
   const p = state.player;
   return (state.chunk.monsters ?? [])
@@ -428,6 +430,16 @@ function serializeMonsters(state: GameState): {
         isUndead: flags ? flags.has(MonsterRaceFlag.UNDEAD) : false,
         isDragon: flags ? flags.has(MonsterRaceFlag.DRAGON) : false,
         isDemon: flags ? flags.has(MonsterRaceFlag.DEMON) : false,
+        isAnimal: flags ? flags.has(MonsterRaceFlag.ANIMAL) : false,
+        isOrc: flags ? flags.has(MonsterRaceFlag.ORC) : false,
+        isTroll: flags ? flags.has(MonsterRaceFlag.TROLL) : false,
+        isGiant: flags ? flags.has(MonsterRaceFlag.GIANT) : false,
+        // Monster elemental immunities (for brand effectiveness)
+        imAcid: flags ? flags.has(MonsterRaceFlag.IM_ACID) : false,
+        imElec: flags ? flags.has(MonsterRaceFlag.IM_ELEC) : false,
+        imFire: flags ? flags.has(MonsterRaceFlag.IM_FIRE) : false,
+        imCold: flags ? flags.has(MonsterRaceFlag.IM_COLD) : false,
+        imPois: flags ? flags.has(MonsterRaceFlag.IM_POIS) : false,
       };
     })
     .filter((m) => m.distance <= 20)

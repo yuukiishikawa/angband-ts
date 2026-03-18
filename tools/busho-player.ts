@@ -77,6 +77,102 @@ const ELEM_NAME_TO_IDX: Record<string, number> = {
   NETHER: 10, CHAOS: 11, DISEN: 12,
 };
 
+// ── スレイ/ブランドマッピング ──
+// Slay index → { raceKey, multiplier }
+// raceKey matches monster field names from ai-server
+const SLAY_TABLE: { raceKey: string; mult: number }[] = [
+  { raceKey: "isEvil", mult: 2 },    // 0: EVIL_2
+  { raceKey: "isAnimal", mult: 2 },   // 1: ANIMAL_2
+  { raceKey: "isOrc", mult: 3 },      // 2: ORC_3
+  { raceKey: "isTroll", mult: 3 },    // 3: TROLL_3
+  { raceKey: "isGiant", mult: 3 },    // 4: GIANT_3
+  { raceKey: "isDemon", mult: 3 },    // 5: DEMON_3
+  { raceKey: "isDragon", mult: 3 },   // 6: DRAGON_3
+  { raceKey: "isUndead", mult: 3 },   // 7: UNDEAD_3
+  { raceKey: "isDemon", mult: 5 },    // 8: DEMON_5
+  { raceKey: "isDragon", mult: 5 },   // 9: DRAGON_5
+  { raceKey: "isUndead", mult: 5 },   // 10: UNDEAD_5
+];
+
+// Brand index → { element, immunity key, multiplier }
+const BRAND_TABLE: { elem: string; imKey: string; mult: number }[] = [
+  { elem: "ACID", imKey: "imAcid", mult: 3 },  // 0: ACID_3
+  { elem: "ELEC", imKey: "imElec", mult: 3 },  // 1: ELEC_3
+  { elem: "FIRE", imKey: "imFire", mult: 3 },  // 2: FIRE_3
+  { elem: "COLD", imKey: "imCold", mult: 3 },  // 3: COLD_3
+  { elem: "POIS", imKey: "imPois", mult: 3 },  // 4: POIS_3
+  { elem: "ACID", imKey: "imAcid", mult: 2 },  // 5: ACID_2
+  { elem: "ELEC", imKey: "imElec", mult: 2 },  // 6: ELEC_2
+  { elem: "FIRE", imKey: "imFire", mult: 2 },  // 7: FIRE_2
+  { elem: "COLD", imKey: "imCold", mult: 2 },  // 8: COLD_2
+  { elem: "POIS", imKey: "imPois", mult: 2 },  // 9: POIS_2
+];
+
+/**
+ * 特定モンスターに対する武器の実効DPS計算
+ * スレイ/ブランドのマルチプライヤーを考慮
+ */
+function weaponDpsVsMonster(
+  weapon: { dd?: number; ds?: number; toH: number; toD: number; brands?: number[]; slays?: number[] },
+  playerToD: number,
+  monster: Record<string, any>,
+): number {
+  const baseDmg = (weapon.dd ?? 1) * ((weapon.ds ?? 4) + 1) / 2 + weapon.toD + playerToD;
+
+  // 最大スレイマルチプライヤーを検索
+  let bestMult = 1;
+  if (weapon.slays) {
+    for (const slayIdx of weapon.slays) {
+      const slay = SLAY_TABLE[slayIdx];
+      if (slay && monster[slay.raceKey]) {
+        bestMult = Math.max(bestMult, slay.mult);
+      }
+    }
+  }
+
+  // ブランドマルチプライヤー（モンスター耐性で無効化）
+  if (weapon.brands) {
+    for (const brandIdx of weapon.brands) {
+      const brand = BRAND_TABLE[brandIdx];
+      if (brand && !monster[brand.imKey]) {
+        bestMult = Math.max(bestMult, brand.mult);
+      }
+    }
+  }
+
+  return baseDmg * bestMult;
+}
+
+/**
+ * インベントリから特定モンスターに最適な武器を選ぶ
+ * 現装備より実効DPSが高い武器があればそのスロットを返す
+ */
+function findBestWeaponForMonster(
+  inventory: any[], equipment: any[], playerToD: number, monster: Record<string, any>,
+): { slot: number; name: string; dps: number; currentDps: number } | null {
+  const currentWeapon = equipment.find((e: any) => WEAPON_TVALS.has(e.tval));
+  if (!currentWeapon) return null;
+
+  const currentDps = weaponDpsVsMonster(currentWeapon, playerToD, monster);
+
+  let bestSlot = -1;
+  let bestDps = currentDps;
+  let bestName = "";
+
+  for (const item of inventory) {
+    if (!WEAPON_TVALS.has(item.tval)) continue;
+    const dps = weaponDpsVsMonster(item, playerToD, monster);
+    if (dps > bestDps * 1.3) { // 30%以上のDPS増加がある場合のみスワップ（頻繁な交換防止）
+      bestDps = dps;
+      bestSlot = item.slot;
+      bestName = item.name;
+    }
+  }
+
+  if (bestSlot === -1) return null;
+  return { slot: bestSlot, name: bestName, dps: bestDps, currentDps };
+}
+
 // 装備品のパワースコア計算 (フラグ・耐性・修正値を考慮)
 function itemPower(item: {
   tval: number; toH: number; toD: number; toA: number;
@@ -1656,11 +1752,22 @@ async function playGame() {
       const target = adjacentMonsters.sort((a: any, b: any) => a.hp - b.hp)[0];
       const dir = directionTo(px, py, target.x, target.y);
 
+      // === スレイ/ブランド対応の武器スワップ ===
+      // ターゲットに対して現武器よりDPSが30%以上高い武器がインベントリにあればスワップ
+      const weaponSwap = findBestWeaponForMonster(inv, p.equipment ?? [], p.toD ?? 0, target);
+      if (weaponSwap) {
+        addLesson(state.turn, state.depth, "武器スワップ",
+          `${target.name}に対し${weaponSwap.name}へ交換 (DPS ${Math.round(weaponSwap.currentDps)}→${Math.round(weaponSwap.dps)})`);
+        state = await sendCommand({ type: CMD.EQUIP, itemIndex: weaponSwap.slot });
+        continue; // 装備変更でターン消費、次ターンで攻撃
+      }
+
       // 戦闘予測: 自分のDPS vs 被ダメ推定 (2体以上の時のみ)
       let combatUnwinnable = false;
       if (adjacentMonsters.length >= 2) {
         const weapon = (p.equipment ?? []).find((e: any) => WEAPON_TVALS.has(e.tval));
-        const avgWeaponDmg = weapon ? ((weapon.dd ?? 1) * ((weapon.ds ?? 4) + 1) / 2 + (weapon.toD ?? 0) + (p.toD ?? 0)) : (p.level / 2 + 3);
+        // スレイ/ブランド考慮のDPS計算（ターゲットに対する実効ダメージ）
+        const avgWeaponDmg = weapon ? weaponDpsVsMonster(weapon, p.toD ?? 0, target) : (p.level / 2 + 3);
         const totalEnemyHp = adjacentMonsters.reduce((s: number, m: any) => s + m.hp, 0);
         const turnsToKill = Math.ceil(totalEnemyHp / Math.max(avgWeaponDmg, 1));
         // ブレス持ちの追加ダメージを考慮 (HPの1/6が基本ダメージ、耐性ありなら1/3に軽減)
@@ -1849,6 +1956,18 @@ async function playGame() {
     );
     if (nearbyMonsters.length > 0 && stuckCount < 5 && noProgressCount < 50) {
       const closest = nearbyMonsters.sort((a: any, b: any) => a.distance - b.distance)[0];
+
+      // 接近中に武器スワップ（距離2-3で余裕がある時）
+      if (closest.distance >= 2) {
+        const preSwap = findBestWeaponForMonster(inv, p.equipment ?? [], p.toD ?? 0, closest);
+        if (preSwap) {
+          addLesson(state.turn, state.depth, "先行武器スワップ",
+            `${closest.name}(dist${closest.distance})接近中。${preSwap.name}へ交換 (DPS ${Math.round(preSwap.currentDps)}→${Math.round(preSwap.dps)})`);
+          state = await sendCommand({ type: CMD.EQUIP, itemIndex: preSwap.slot });
+          continue;
+        }
+      }
+
       // BFSで到達可能か確認（壁越しの敵は無視）
       const approachDir = bfsNextStep(tiles, px, py, closest.x, closest.y);
       if (approachDir !== null) {
