@@ -1047,14 +1047,17 @@ function resupplyOnDescent(player: Player, kinds: readonly ObjectKind[]): void {
   // Resupply to minimum levels
   const depth = player.depth ?? 0;
   const resupplyTargets = [
-    { tval: 25, name: "Phase Door", minQty: depth >= 30 ? 20 : depth >= 15 ? 15 : 10 },
-    { tval: 25, name: "Teleportation", minQty: depth >= 30 ? 12 : depth >= 15 ? 8 : 5 },
+    { tval: 25, name: "Phase Door", minQty: depth >= 40 ? 25 : depth >= 30 ? 20 : depth >= 15 ? 15 : 10 },
+    { tval: 25, name: "Teleportation", minQty: depth >= 40 ? 20 : depth >= 30 ? 15 : depth >= 15 ? 8 : 5 },
     { tval: 26, name: "Cure Light Wounds", minQty: depth >= 20 ? 5 : 10 },
-    { tval: 26, name: "Cure Serious Wounds", minQty: depth >= 20 ? 10 : depth >= 10 ? 8 : 5 },
-    { tval: 26, name: "Cure Critical Wounds", minQty: depth >= 20 ? 15 : depth >= 12 ? 8 : depth >= 8 ? 3 : 0 },
+    { tval: 26, name: "Cure Serious Wounds", minQty: depth >= 30 ? 5 : depth >= 20 ? 10 : depth >= 10 ? 8 : 5 },
+    { tval: 26, name: "Cure Critical Wounds", minQty: depth >= 40 ? 25 : depth >= 30 ? 20 : depth >= 20 ? 15 : depth >= 12 ? 8 : depth >= 8 ? 3 : 0 },
+    { tval: 26, name: "Healing", minQty: depth >= 40 ? 15 : depth >= 30 ? 10 : depth >= 25 ? 5 : 0 },
+    { tval: 26, name: "*Healing*", minQty: depth >= 45 ? 8 : depth >= 40 ? 5 : 0 },
     { tval: 28, name: "Ration of Food", minQty: 5 },
-    { tval: 25, name: "Word of Recall", minQty: 3 },
-    { tval: 26, name: "Speed", minQty: depth >= 10 ? 5 : depth >= 5 ? 3 : 0 },
+    { tval: 25, name: "Word of Recall", minQty: depth >= 30 ? 5 : 3 },
+    { tval: 26, name: "Speed", minQty: depth >= 40 ? 15 : depth >= 30 ? 10 : depth >= 10 ? 5 : depth >= 5 ? 3 : 0 },
+    { tval: 25, name: "Teleport Level", minQty: depth >= 35 ? 3 : 0 },
   ];
 
   for (const target of resupplyTargets) {
@@ -1075,17 +1078,22 @@ function giveBonusItems(player: Player, kinds: readonly ObjectKind[]): void {
   const pGear = player as Player & { inventory: ObjectType[] };
   if (!pGear.inventory) pGear.inventory = [];
   const bonusItems = [
-    { tval: 9, name: "Long Sword", qty: 1, toH: 4, toD: 4 },
-    { tval: 16, name: "Studded Leather Armour", qty: 1, toA: 3 },
-    { tval: 14, name: "Small Metal Shield", qty: 1, toA: 3 },
+    { tval: 9, name: "Broad Sword", qty: 1, toH: 6, toD: 6 },
+    { tval: 17, name: "Metal Brigandine Armour", qty: 1, toA: 5 },
+    { tval: 14, name: "Small Metal Shield", qty: 1, toA: 5 },
+    { tval: 12, name: "Iron Helm", qty: 1, toA: 3 },
+    { tval: 11, name: "Set of Leather Gloves", qty: 1, toA: 2 },
+    { tval: 10, name: "Pair of Iron Shod Boots", qty: 1, toA: 2 },
+    { tval: 15, name: "Cloak", qty: 1, toA: 2 },
     { tval: 28, name: "Ration of Food", qty: 10 },
     { tval: 26, name: "Cure Light Wounds", qty: 30 },
     { tval: 26, name: "Cure Serious Wounds", qty: 15 },
-    { tval: 26, name: "Cure Critical Wounds", qty: 15 },
+    { tval: 26, name: "Cure Critical Wounds", qty: 20 },
+    { tval: 26, name: "Healing", qty: 5 },
     { tval: 25, name: "Phase Door", qty: 30 },
-    { tval: 25, name: "Teleportation", qty: 15 },
+    { tval: 25, name: "Teleportation", qty: 20 },
     { tval: 25, name: "Word of Recall", qty: 5 },
-    { tval: 26, name: "Speed", qty: 5 },
+    { tval: 26, name: "Speed", qty: 10 },
   ];
   const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
   for (const bonus of bonusItems) {

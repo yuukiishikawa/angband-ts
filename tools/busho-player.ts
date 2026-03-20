@@ -490,30 +490,45 @@ function findStrongHealingPotion(inventory: any[]): number | null {
 
 /**
  * 段階的回復ポーション選択 — HP残量に応じて適切な強さのポーションを選ぶ
- * - HP 50%+ (軽傷): CLW優先 (資源節約)
- * - HP 30-50% (中傷): CSW優先
- * - HP <30% (重傷): CCW優先 (最大回復)
+ * - HP 60%+ (軽傷): CLW優先
+ * - HP 40-60% (中傷): CSW → CCW
+ * - HP 20-40% (重傷): CCW → Healing
+ * - HP <20% (致命): *Healing* → Healing → CCW
  */
 function findTieredHealingPotion(inventory: any[], hpPct: number): number | null {
-  const potions = inventory
-    .filter((item: any) => item.tval === TVAL.POTION && item.name.includes("Cure") && item.qty > 0);
-  if (potions.length === 0) return null;
+  const allPotions = inventory
+    .filter((item: any) => item.tval === TVAL.POTION && item.qty > 0);
 
-  // 名前で分類
-  const clw = potions.filter((p: any) => p.name.includes("Light"));
-  const csw = potions.filter((p: any) => p.name.includes("Serious"));
-  const ccw = potions.filter((p: any) => p.name.includes("Critical"));
+  const clw = allPotions.filter((p: any) => p.name === "Cure Light Wounds");
+  const csw = allPotions.filter((p: any) => p.name === "Cure Serious Wounds");
+  const ccw = allPotions.filter((p: any) => p.name === "Cure Critical Wounds");
+  const healing = allPotions.filter((p: any) => p.name === "Healing");
+  const starHealing = allPotions.filter((p: any) => p.name === "*Healing*");
+  const life = allPotions.filter((p: any) => p.name === "Life");
 
-  if (hpPct >= 0.5) {
-    // 軽傷: CLW → CSW → CCW
-    return (clw[0]?.slot ?? csw[0]?.slot ?? ccw[0]?.slot) ?? null;
-  } else if (hpPct >= 0.3) {
-    // 中傷: CSW → CCW → CLW
-    return (csw[0]?.slot ?? ccw[0]?.slot ?? clw[0]?.slot) ?? null;
-  } else {
-    // 重傷: CCW → CSW → CLW
+  if (hpPct < 0.2) {
+    // 致命: 最強を使う
+    return (starHealing[0]?.slot ?? life[0]?.slot ?? healing[0]?.slot ?? ccw[0]?.slot ?? csw[0]?.slot) ?? null;
+  } else if (hpPct < 0.4) {
+    // 重傷: Healing → CCW
+    return (healing[0]?.slot ?? ccw[0]?.slot ?? csw[0]?.slot ?? clw[0]?.slot) ?? null;
+  } else if (hpPct < 0.6) {
+    // 中傷: CCW → CSW
     return (ccw[0]?.slot ?? csw[0]?.slot ?? clw[0]?.slot) ?? null;
+  } else {
+    // 軽傷: CLW → CSW
+    return (clw[0]?.slot ?? csw[0]?.slot ?? ccw[0]?.slot) ?? null;
   }
+}
+
+/**
+ * Teleport Level scroll — 緊急フロア脱出 (召喚群れなど)
+ */
+function findTeleportLevelScroll(inventory: any[]): number | null {
+  const scroll = inventory.find((item: any) =>
+    item.tval === TVAL.SCROLL && item.name.includes("Teleport Level") && item.qty > 0
+  );
+  return scroll ? scroll.slot : null;
 }
 
 function findPhaseScroll(inventory: any[]): number | null {
@@ -1393,7 +1408,7 @@ async function playGame() {
       if (hpPct < RETREAT_HP_THRESHOLD) {
         // 着地先が危険（敵が近い+HP低い）→ もう一回Teleport
         const nearThreat = monsters.filter((m: any) => m.distance <= 3).length;
-        if (hpPct < 0.4 && nearThreat > 0 && state.depth >= 15) {
+        if (hpPct < 0.5 && nearThreat > 0 && state.depth >= 15) {
           const retreatTele = findTeleportScroll(inv);
           if (retreatTele !== null) {
             addLesson(state.turn, state.depth, "退避再テレポート",
@@ -1736,7 +1751,10 @@ async function playGame() {
       );
       // 召喚持ちは素早く倒さないと数が増える
       const hasSummonerNear = monsters.some((m: any) => m.hasSummon && m.distance <= 5);
-      if ((hasDangerNear || nearEnemyCount >= 3 || hasSummonerNear) && isDeep) {
+      // DL30+では敵が近くにいるだけで加速（生存最優先）
+      const isUltraDeep = state.depth >= 30;
+      if ((hasDangerNear || nearEnemyCount >= 3 || hasSummonerNear) && isDeep
+          || (isUltraDeep && nearEnemyCount >= 1)) {
         const speedSlot = findSpeedPotion(inv);
         if (speedSlot !== null) {
           addLesson(state.turn, state.depth, "加速",
@@ -2261,7 +2279,7 @@ async function playGame() {
     const tooLongOnLevel = turnsOnLevel > tooLongThreshold;
 
     // 深層では回復薬を十分持っていないと降下しない
-    const minHealingForDescent = state.depth >= 15 ? 6 : state.depth >= 12 ? 4 : state.depth >= 8 ? 2 : 1;
+    const minHealingForDescent = state.depth >= 40 ? 15 : state.depth >= 30 ? 10 : state.depth >= 15 ? 6 : state.depth >= 12 ? 4 : state.depth >= 8 ? 2 : 1;
     const healingOk = totalHealingQty >= minHealingForDescent;
 
     // 逃走手段チェック (深層では必須)
