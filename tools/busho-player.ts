@@ -1319,6 +1319,18 @@ async function playGame() {
     // 逃走後はHPを回復しきるまで戦闘を避け、回復に専念する
     if (retreatMode && monsters.filter((m: any) => m.distance <= 1).length === 0) {
       if (hpPct < RETREAT_HP_THRESHOLD) {
+        // 着地先が危険（敵が近い+HP低い）→ もう一回Teleport
+        const nearThreat = monsters.filter((m: any) => m.distance <= 3).length;
+        if (hpPct < 0.4 && nearThreat > 0 && state.depth >= 15) {
+          const retreatTele = findTeleportScroll(inv);
+          if (retreatTele !== null) {
+            addLesson(state.turn, state.depth, "退避再テレポート",
+              `退避中HP${Math.round(hpPct*100)}%に敵${nearThreat}体接近。再Teleport`);
+            state = await sendCommand({ type: CMD.READ, itemIndex: retreatTele });
+            stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+            continue;
+          }
+        }
         // 回復スペル
         if (canCastSpells) {
           const healSpell = findBestHealSpell(spells, p.level, sp, false);
@@ -1793,8 +1805,18 @@ async function playGame() {
     // === 優先度4: 隣接敵との戦闘 ===
     const adjacentMonsters = monsters.filter((m: any) => m.distance <= 1);
     if (adjacentMonsters.length > 0) {
-      // 複数の隣接敵 → 最弱を狙う
-      const target = adjacentMonsters.sort((a: any, b: any) => a.hp - b.hp)[0];
+      // ターゲット選択: 召喚/ブレス持ちを優先排除、次に最弱
+      const target = adjacentMonsters.sort((a: any, b: any) => {
+        // 召喚持ちは最優先で排除（放置すると増殖）
+        const aSummon = a.hasSummon ? -1000 : 0;
+        const bSummon = b.hasSummon ? -1000 : 0;
+        // ブレス持ちは次に優先
+        const aBreath = (a.breathElements?.length ?? 0) > 0 ? -500 : 0;
+        const bBreath = (b.breathElements?.length ?? 0) > 0 ? -500 : 0;
+        // 1体なら最弱狙い、複数なら脅威度優先
+        if (adjacentMonsters.length === 1) return a.hp - b.hp;
+        return (a.hp + aSummon + aBreath) - (b.hp + bSummon + bBreath);
+      })[0];
       const dir = directionTo(px, py, target.x, target.y);
 
       // === スレイ/ブランド対応の武器スワップ ===
@@ -1833,6 +1855,7 @@ async function playGame() {
       const shouldFlee = !anyForceFight && (
         (adjacentMonsters.length >= 2 && hpPct < 0.6) || adjacentMonsters.length >= 3 || (hasDangerousAdjacent && hpPct < 0.7)
         || (isVeryDeep && adjacentMonsters.length >= 1 && hpPct < 0.4)
+        || (isExtremeDeep && adjacentMonsters.length >= 2 && hpPct < 0.65) // DL20+: 2体で65%以下は逃走
         || (combatUnwinnable && hpPct < 0.6)
       );
       if (shouldFlee) {
