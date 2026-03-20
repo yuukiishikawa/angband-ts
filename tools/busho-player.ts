@@ -1036,6 +1036,76 @@ async function buySupplies(state: any) {
   }
 }
 
+// ── 町での装備品購入 ──
+// StoreType: 1=Armory, 2=Weapon
+async function buyEquipment(state: any) {
+  const p = state.player;
+  let currentGold = p.gold;
+  if (currentGold < 100) return;
+
+  const equip = p.equipment ?? [];
+  let totalUpgrades = 0;
+
+  // 武器店(2)と防具店(1)をチェック
+  for (const storeType of [2, 1]) {
+    const freshState = await getState();
+    currentGold = freshState.player.gold;
+    if (currentGold < 100) break;
+    const stores = freshState.stores;
+    if (!stores || !stores[storeType]) continue;
+
+    const stock = stores[storeType].stock;
+    const currentEquip = freshState.player.equipment ?? [];
+
+    for (const stockItem of stock) {
+      if (stockItem.price > currentGold || stockItem.price <= 0) continue;
+      if (!EQUIPPABLE_TVALS.has(stockItem.tval)) continue;
+
+      // 現装備と比較
+      const stockPower = itemPower(stockItem);
+      const currentSlotEquip = currentEquip.find((e: any) => sameEquipCategory(e.tval, stockItem.tval));
+      const currentPower = currentSlotEquip ? itemPower(currentSlotEquip) : 0;
+
+      // 20%以上パワーアップ or 空スロットでパワー正
+      if (stockPower > currentPower * 1.2 || (!currentSlotEquip && stockPower > 10)) {
+        // 高すぎるものは買わない（ゴールドの60%以上は使わない）
+        if (stockItem.price > currentGold * 0.6) continue;
+
+        try {
+          const res = await fetch(`${API}/buy`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ storeType, itemIndex: stockItem.index }),
+          });
+          const result = await res.json();
+          if (result.success) {
+            totalUpgrades++;
+            currentGold = result.state?.player?.gold ?? (currentGold - stockItem.price);
+            console.log(`  [装備購入] ${stockItem.name} (power=${stockPower} > ${currentPower}, ${stockItem.price}G) 残金${currentGold}G`);
+
+            // 購入後に即装備
+            const newState = await getState();
+            const newInv = newState.player.inventory;
+            const boughtItem = newInv.find((i: any) =>
+              i.tval === stockItem.tval && i.name === stockItem.name
+            );
+            if (boughtItem) {
+              await sendCommand({ type: CMD.EQUIP, itemIndex: boughtItem.slot });
+              console.log(`  [装備] ${boughtItem.name}を装備`);
+            }
+            break; // 再取得が必要なのでストアループを抜ける
+          }
+        } catch (e) {
+          console.log(`  [buyEquipment] ERROR: ${e}`);
+        }
+      }
+    }
+  }
+  if (totalUpgrades > 0) {
+    addLesson(0, 0, "装備購入", `${totalUpgrades}個装備品購入。残金${currentGold}G`);
+  }
+}
+
 // ── メインAIループ ──
 async function playGame() {
   console.log("=== 武将AI プレイ開始 ===\n");
@@ -1113,6 +1183,8 @@ async function playGame() {
         const phaseQty = inv2.filter((i: any) => i.name?.includes("Phase Door")).reduce((s: number, i: any) => s + i.qty, 0);
         console.log(`  [町到着] Gold:${state.player.gold} Cure:${cureQty} Phase:${phaseQty}`);
         await sellJunk(state); // 先に不要品を売却してゴールド確保
+        state = await getState();
+        await buyEquipment(state); // 装備品を先に購入（ゴールド消費前）
         state = await getState();
         await buySupplies(state);
         state = await getState(); // refresh state after purchases
@@ -1818,6 +1890,46 @@ async function playGame() {
         return (a.hp + aSummon + aBreath) - (b.hp + bSummon + bBreath);
       })[0];
       const dir = directionTo(px, py, target.x, target.y);
+
+      // === 回廊戦闘: 複数敵に囲まれそうなら狭い場所に退避 ===
+      // 2体以上隣接 + 開けた場所にいる → 隣の回廊に1歩移動
+      // DL15+でのみ有効（浅層では不要、移動コストがもったいない）
+      if (adjacentMonsters.length >= 3 && hpPct >= 0.5 && state.depth >= 15) {
+        // 現在地の通行可能な隣接タイル数を数える
+        let openNeighbors = 0;
+        for (const d of ALL_DIRS) {
+          const [dx, dy] = dirOffsets[d]!;
+          if (isPassable(tiles, px + dx, py + dy)) openNeighbors++;
+        }
+        // 4つ以上開けている(部屋の中)→ 2-3の狭い場所を探す
+        if (openNeighbors >= 4) {
+          let bestCorridorDir = -1;
+          let bestCorridorOpenness = 99;
+          for (const d of ALL_DIRS) {
+            const [dx, dy] = dirOffsets[d]!;
+            const nx = px + dx, ny = py + dy;
+            if (!isPassable(tiles, nx, ny)) continue;
+            // 敵のいる方向には移動しない
+            if (adjacentMonsters.some((m: any) => m.x === nx && m.y === ny)) continue;
+            // その先の開き具合を計算
+            let neighborOpen = 0;
+            for (const d2 of ALL_DIRS) {
+              const [dx2, dy2] = dirOffsets[d2]!;
+              if (isPassable(tiles, nx + dx2, ny + dy2)) neighborOpen++;
+            }
+            if (neighborOpen <= 3 && neighborOpen < bestCorridorOpenness) {
+              bestCorridorOpenness = neighborOpen;
+              bestCorridorDir = d;
+            }
+          }
+          if (bestCorridorDir !== -1) {
+            addLesson(state.turn, state.depth, "回廊退避",
+              `隣接敵${adjacentMonsters.length}体@開けた場所(${openNeighbors}隣接)。狭い場所(${bestCorridorOpenness}隣接)へ移動`);
+            state = await sendCommand({ type: CMD.WALK, direction: bestCorridorDir });
+            continue;
+          }
+        }
+      }
 
       // === スレイ/ブランド対応の武器スワップ ===
       // ターゲットに対して現武器よりDPSが30%以上高い武器がインベントリにあればスワップ
