@@ -1144,15 +1144,15 @@ async function playGame() {
   let levelEntryTurn = 0;
   const MAX_TURNS_PER_LEVEL = 3000; // 最大ターン数超えたら降下OK (5000→3000で速度UP)
 
-  // 深度別の最低撃破数（レベリングのため深層では多めに）
+  // 深度別の最低撃破数（浅層でしっかりレベリング、深層は探索・降下重視）
   function minKillsForDepth(depth: number): number {
     if (depth <= 1) return 0;  // DL0-1: 即降下OK
-    if (depth <= 3) return 1;  // DL2-3: 1体
-    if (depth <= 6) return 2;  // DL4-6: 2体
-    if (depth <= 10) return 3; // DL7-10: 3体
-    if (depth <= 15) return 4; // DL11-15: 4体
+    if (depth <= 3) return 2;  // DL2-3: 2体
+    if (depth <= 6) return 4;  // DL4-6: 4体 (安全にレベリング)
+    if (depth <= 10) return 6; // DL7-10: 6体
+    if (depth <= 15) return 8; // DL11-15: 8体 (ここでCL15+を目指す)
     if (depth <= 20) return 5; // DL16-20: 5体
-    return 4;                  // DL21+: 4体
+    return 3;                  // DL21+: 3体 (深層は速めに降下)
   }
 
   let lastKnownDepth = state.depth;
@@ -1408,7 +1408,7 @@ async function playGame() {
       if (hpPct < RETREAT_HP_THRESHOLD) {
         // 着地先が危険（敵が近い+HP低い）→ もう一回Teleport
         const nearThreat = monsters.filter((m: any) => m.distance <= 3).length;
-        if (hpPct < 0.5 && nearThreat > 0 && state.depth >= 15) {
+        if (hpPct < 0.4 && nearThreat > 0 && state.depth >= 15) {
           const retreatTele = findTeleportScroll(inv);
           if (retreatTele !== null) {
             addLesson(state.turn, state.depth, "退避再テレポート",
@@ -2295,8 +2295,8 @@ async function playGame() {
     const escapeOk = state.depth < 8 || hasEscapeMeans || tooLongOnLevel;
 
     // CLが低すぎる場合は降下を控える (DLとCLの乖離チェック — 深層ではより厳しく)
-    // v9: DL20+で比率維持。DL20でCL16必要(0.8), DL10でCL8必要(0.75)
-    const minClRatio = state.depth >= 20 ? 0.8 : state.depth >= 10 ? 0.75 : 0.6;
+    // DL30+で比率引き上げ。DL30でCL24必要(0.8), DL20でCL16(0.8), DL10でCL8(0.75)
+    const minClRatio = state.depth >= 30 ? 0.8 : state.depth >= 20 ? 0.8 : state.depth >= 10 ? 0.75 : 0.6;
     const clOk = p.level >= Math.floor(state.depth * minClRatio) || state.depth <= 3;
 
     // tooLongOnLevelでもclOkは必須 (レベル不足での降下は死因上位)
