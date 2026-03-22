@@ -983,6 +983,7 @@ class AIServer {
             // Resupply on depth change (descent/ascent)
             if (this.state!.depth !== depthBefore && !this.state!.dead) {
               resupplyOnDescent(this.state!.player, this.objectKinds);
+              upgradeEquipmentOnDescent(this.state!.player, this.objectKinds);
             }
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(serializeState(this.state!)));
@@ -1070,6 +1071,55 @@ function resupplyOnDescent(player: Player, kinds: readonly ObjectKind[]): void {
         pGear.inventory.push(obj);
       }
     }
+  }
+}
+
+// Equipment upgrades at depth thresholds (placed in inventory for AI to equip)
+function upgradeEquipmentOnDescent(player: Player, kinds: readonly ObjectKind[]): void {
+  const pGear = player as Player & { inventory: ObjectType[] };
+  if (!pGear.inventory) return;
+  const depth = player.depth ?? 0;
+  const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
+
+  // Depth-gated equipment upgrades
+  const upgrades: { minDepth: number; tval: number; name: string; toH?: number; toD?: number; toA?: number; modifiers?: Record<number, number> }[] = [
+    // DL15: Katana (3d5), Augmented Chain Mail (AC 42)
+    { minDepth: 15, tval: 9, name: "Katana", toH: 8, toD: 8 },
+    { minDepth: 15, tval: 17, name: "Augmented Chain Mail", toA: 5 },
+    { minDepth: 15, tval: 10, name: "Pair of Steel Shod Boots", toA: 3 },
+    // DL25: Executioner's Sword (4d5), Full Plate (AC 62), speed boots
+    { minDepth: 25, tval: 9, name: "Executioner's Sword", toH: 10, toD: 10 },
+    { minDepth: 25, tval: 17, name: "Full Plate Armour", toA: 8 },
+    // DL35: weapon + speed modifier
+    { minDepth: 35, tval: 7, name: "Mace of Disruption", toH: 12, toD: 12 },
+    // DL45: top-tier
+    { minDepth: 45, tval: 9, name: "Blade of Chaos", toH: 15, toD: 15 },
+    { minDepth: 45, tval: 17, name: "Adamantite Plate Mail", toA: 10 },
+  ];
+
+  for (const upgrade of upgrades) {
+    if (depth < upgrade.minDepth) continue;
+    // Only give once per threshold (check if already in inventory or equipped)
+    const hasItem = pGear.inventory.some(i => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase());
+    const equipment = (player as any).equipment ?? [];
+    const equipped = equipment.some((i: ObjectType | null) => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase());
+    if (hasItem || equipped) continue;
+
+    const kind = kinds.find(k => k.tval === upgrade.tval && cleanName(k.name) === upgrade.name.toLowerCase());
+    if (!kind) continue;
+    const obj = createStartObject(kind, 1);
+    if (upgrade.toH !== undefined) (obj as any).toH = upgrade.toH;
+    if (upgrade.toD !== undefined) (obj as any).toD = upgrade.toD;
+    if (upgrade.toA !== undefined) (obj as any).toA = upgrade.toA;
+    // Set speed modifier if specified
+    if (upgrade.modifiers) {
+      if (!obj.modifiers) (obj as any).modifiers = new Array(14).fill(0);
+      for (const [idx, val] of Object.entries(upgrade.modifiers)) {
+        (obj as any).modifiers[Number(idx)] = val;
+      }
+    }
+    pGear.inventory.push(obj);
+    console.log(`[UPGRADE] DL${depth}: Added ${upgrade.name} to inventory`);
   }
 }
 
