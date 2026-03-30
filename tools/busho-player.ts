@@ -298,7 +298,7 @@ function isDangerousMonster(mon: {
 
   // DL20+ではさらに慎重に (ユニークは基本的に危険)
   if (depth >= 20) {
-    if (isUnique && mon.level > playerLevel) return true;
+    if (isUnique) return true; // DL20+ではユニーク全部危険
     if (mon.speed > 120) return true;
     if (mon.level > playerLevel * 1.5 && mon.level >= 10) return true;
     if (mon.maxhp > 200 && mon.level > playerLevel + 3) return true;
@@ -310,7 +310,8 @@ function isDangerousMonster(mon: {
   }
   // DL15+ではより慎重に
   if (depth >= 15) {
-    if (isUnique && mon.level > playerLevel + 3) return true;
+    if (isUnique && mon.level > playerLevel) return true;
+    if (isUnique && mon.maxhp > 200) return true;
     if (mon.speed > 120 && mon.level > playerLevel) return true;
     if (mon.level > playerLevel * 2.0 && mon.level >= 10) return true;
     // 耐性なしブレス持ちで格上 → 危険
@@ -320,11 +321,15 @@ function isDangerousMonster(mon: {
     return false;
   }
 
-  if (isUnique && mon.level > playerLevel + 8) return true;
+  if (isUnique && mon.level > playerLevel + 5) return true;
+  // ユニークでHP200超え → 1 blowでは倒せない消耗戦になる
+  if (isUnique && mon.maxhp > 150 && mon.level > playerLevel) return true;
   if (mon.speed > 120 && mon.level > playerLevel + 3) return true;
   if (mon.level > playerLevel * 2.5 && mon.level >= 10) return true;
   // 耐性なしブレスは浅層でも大ダメージ
   if (hasUnresistedBreath && mon.level > playerLevel + 5) return true;
+  // 高HPモンスター (非ユニーク含む) は消耗戦で危険
+  if (mon.maxhp > 300 && mon.level > playerLevel + 3) return true;
   return false;
 }
 
@@ -1570,8 +1575,14 @@ async function playGame() {
         const emergencyPersistent = emFleeCount >= 3;
 
         // 持続追跡者 → Phase Door無駄、Teleport/階段優先
-        // 安全弁: 10回以上逃走 → forceFight登録して戦闘に移行 (速度130+は除外)
-        if (emFleeCount >= 10 && closestEnemy && !(closestEnemy.speed >= 130 && (closestEnemy.level >= p.level * 0.7 || closestEnemy.level >= 15))) {
+        // 安全弁: 10回以上逃走 → forceFight登録して戦闘に移行
+        // 除外: 速度130+、ユニーク+HP200超、ユニーク+格上 (消耗戦で確実に死ぬ)
+        const isTooStrongToFight = closestEnemy && (
+          (closestEnemy.speed >= 130 && (closestEnemy.level >= p.level * 0.7 || closestEnemy.level >= 15)) ||
+          (closestEnemy.isUnique && closestEnemy.maxhp > 200) ||
+          (closestEnemy.isUnique && closestEnemy.level > p.level + 3)
+        );
+        if (emFleeCount >= 10 && closestEnemy && !isTooStrongToFight) {
           forceFightMonsters.add(closestEnemy.name);
           fleeCountByMonster.delete(closestEnemy.name);
           // 回復してから戦闘 (逃走せずに下のヒーリングコードへ)
@@ -1612,9 +1623,10 @@ async function playGame() {
           }
         }
 
-        // パスウォール持ち or DL18+ではPhase Doorでは追いつかれる → Teleport優先
+        // パスウォール持ち or DL18+ or 速度120+敵ではPhase Doorでは追いつかれる → Teleport優先
         const hasPassWallChaser = nearbyEnemies.some((m: any) => m.hasPassWall);
-        const preferTeleport = hasPassWallChaser || state.depth >= 18;
+        const hasFastChaser = nearbyEnemies.some((m: any) => m.speed >= 120);
+        const preferTeleport = hasPassWallChaser || hasFastChaser || state.depth >= 18;
 
         // 逃走スペル (Phase Door/Teleport Self)
         if (canCastSpells) {
@@ -1644,11 +1656,47 @@ async function playGame() {
             continue;
           }
         }
+        // 速度130+の敵 → 階段/WoR優先 (Teleportでも追いつかれる)
+        const hasVeryFastEnemy = nearbyEnemies.some((m: any) => m.speed >= 130);
+        if (hasVeryFastEnemy) {
+          const onStairDown = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
+          const onStairUp = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.UP_STAIR);
+          if (onStairDown) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            state = await sendCommand({ type: CMD.GO_DOWN });
+            visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
+            killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
+            levelEntryDetected = false; unreachableItems.clear();
+            teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; fleeCountByMonster.clear();
+            if (state.depth > maxDepthReached) maxDepthReached = state.depth;
+            continue;
+          }
+          if (onStairUp) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            state = await sendCommand({ type: CMD.GO_UP });
+            visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
+            fleeCountByMonster.clear();
+            continue;
+          }
+        }
+        // 速度120+の敵が近くにいるならTeleport優先 (Phase Doorでは追いつかれる)
+        const hasNearbyFastEnemy = nearbyEnemies.some((m: any) => m.speed >= 120);
+        if (hasNearbyFastEnemy || state.depth >= 18) {
+          const teleSlotFast = findTeleportScroll(inv);
+          if (teleSlotFast !== null) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "早期逃走",
+              `HP${Math.round(hpPct*100)}%、高速敵あり。Teleportで確実離脱`);
+            state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotFast });
+            stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+            continue;
+          }
+        }
         const phaseSlot = findPhaseScroll(inv);
         if (phaseSlot !== null) {
           fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "早期逃走",
-            `HP${Math.round(hpPct*100)}%、敵${nearbyEnemies.length}体(dist<=3)。DL${state.depth}では早期逃走`);
+            `HP${Math.round(hpPct*100)}%、敵${nearbyEnemies.length}体(dist<=3)。Phase Doorで退避`);
           state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
           continue;
         }
@@ -1685,7 +1733,19 @@ async function playGame() {
         continue;
       }
 
-      // 回復薬なし → 逃走
+      // 回復薬なし → 逃走 (速度120+敵にはTeleport優先)
+      const hasFastNearby = monsters.some((m: any) => m.distance <= 5 && m.speed >= 120);
+      if ((hasFastNearby || state.depth >= 18) && monsters.length > 0) {
+        const teleSlotFlee = findTeleportScroll(inv);
+        if (teleSlotFlee !== null) {
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+          addLesson(state.turn, state.depth, "逃走",
+            `HP${Math.round(hpPct*100)}%、回復薬なし、高速敵あり。Teleportで脱出`);
+          state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotFlee });
+          stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+          continue;
+        }
+      }
       const phaseSlot = findPhaseScroll(inv);
       if (phaseSlot !== null && monsters.length > 0) {
         fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
@@ -1749,11 +1809,15 @@ async function playGame() {
       const hasDangerNear = monsters.some((m: any) =>
         m.distance <= 5 && isDangerousMonster(m, p.level, state.depth, playerResists)
       );
+      // 速度120+の敵が距離8以内 → 早めに加速 (blood falcon等の高速群れ対策)
+      const hasFastMonsterNear = monsters.some((m: any) =>
+        m.distance <= 8 && m.speed >= 120
+      );
       // 召喚持ちは素早く倒さないと数が増える
       const hasSummonerNear = monsters.some((m: any) => m.hasSummon && m.distance <= 5);
       // DL30+では敵が近くにいるだけで加速（生存最優先）
       const isUltraDeep = state.depth >= 30;
-      if ((hasDangerNear || nearEnemyCount >= 3 || hasSummonerNear) && isDeep
+      if ((hasDangerNear || hasFastMonsterNear || nearEnemyCount >= 3 || hasSummonerNear) && isDeep
           || (isUltraDeep && nearEnemyCount >= 1)) {
         const speedSlot = findSpeedPotion(inv);
         if (speedSlot !== null) {
@@ -1805,11 +1869,13 @@ async function playGame() {
       const monFleeCount = fleeCountByMonster.get(dangerMon.name) || 0;
       fleeCountByMonster.set(dangerMon.name, monFleeCount + 1);
 
-      // 速度130+かつ強い敵はforceFight禁止 — 常に逃走 (2倍速+格上は確実に死ぬ)
+      // forceFight禁止: 速度130+、ユニーク+高HP、ユニーク+格上
       const isTooFastToFight = dangerMon.speed >= 130 && (dangerMon.level >= p.level * 0.7 || dangerMon.level >= 15);
+      const isTooToughToFight = (dangerMon.isUnique && dangerMon.maxhp > 200) ||
+        (dangerMon.isUnique && dangerMon.level > p.level + 3);
 
-      // 6回以上逃走 → もう逃げるのは無駄。forceFight登録して戦闘に移行 (ただし高速敵は除外)
-      if (monFleeCount >= 6 && !isTooFastToFight) {
+      // 6回以上逃走 → もう逃げるのは無駄。forceFight登録して戦闘に移行 (強敵は除外)
+      if (monFleeCount >= 6 && !isTooFastToFight && !isTooToughToFight) {
         forceFightMonsters.add(dangerMon.name);
         fleeCountByMonster.delete(dangerMon.name);
         // 下のisDangerousチェックを再評価 → 戦闘に移行 (逃走しない)
@@ -1820,7 +1886,58 @@ async function playGame() {
       const isPersistentChaser = (monFleeCount >= 2 || isTooFastToFight) && !forceFightMonsters.has(dangerMon.name);
 
       if (isPersistentChaser) {
-        // まずTeleportで距離を取る (WoRより安い)
+        // 速度130+は階段/WoR優先 (Teleportでも追いつかれる)
+        if (isTooFastToFight) {
+          // 1st: 足元に階段があれば即降下
+          const onDownFast = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
+          const onUpFast = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.UP_STAIR);
+          if (onDownFast) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "高速敵脱出",
+              `${dangerMon.name}(spd${dangerMon.speed})。階段降下で階層脱出`);
+            state = await sendCommand({ type: CMD.GO_DOWN });
+            visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
+            killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
+            levelEntryDetected = false; unreachableItems.clear();
+            teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; fleeCountByMonster.clear();
+            if (state.depth > maxDepthReached) maxDepthReached = state.depth;
+            continue;
+          }
+          if (onUpFast) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "高速敵脱出",
+              `${dangerMon.name}(spd${dangerMon.speed})。階段上昇で階層脱出`);
+            state = await sendCommand({ type: CMD.GO_UP });
+            visited.clear(); lastVisitedSize = 0; noProgressCount = 0; stuckCount = 0;
+            killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
+            fleeCountByMonster.clear();
+            continue;
+          }
+          // 2nd: WoRで帰還 (Teleportより確実)
+          if (monFleeCount >= 2 && state.depth > 0 && !(p.wordRecall > 0)) {
+            const recallSlotFast = findRecallScroll(inv);
+            if (recallSlotFast !== null) {
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+              addLesson(state.turn, state.depth, "高速敵脱出",
+                `${dangerMon.name}(spd${dangerMon.speed})から${monFleeCount+1}回逃走。WoR帰還`);
+              state = await sendCommand({ type: CMD.READ, itemIndex: recallSlotFast });
+              continue;
+            }
+          }
+          // 3rd: Teleport (最終手段 — 1回だけ。追いつかれたら次はWoR)
+          if (monFleeCount < 2) {
+            const teleSlotFast = findTeleportScroll(inv);
+            if (teleSlotFast !== null) {
+              fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+              addLesson(state.turn, state.depth, "高速敵回避",
+                `${dangerMon.name}(spd${dangerMon.speed})。Teleport(1回限り)で距離確保`);
+              state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotFast });
+              stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+              continue;
+            }
+          }
+        }
+        // 通常の persistent chaser: Teleportで距離を取る
         const teleSlotChaser = findTeleportScroll(inv);
         if (teleSlotChaser !== null) {
           fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
@@ -1869,6 +1986,19 @@ async function playGame() {
             `${dangerMon.name}(Lv${dangerMon.level},spd${dangerMon.speed}${breathInfo}${summonInfo})接近。${escSpell.name}で退避`);
           state = await sendCommand({ type: CMD.CAST, spellIndex: escSpell.index, direction: 5 });
           if (escSpell.name.includes("Teleport")) { stuckCount = 0; noProgressCount = 0; }
+          continue;
+        }
+      }
+      // 速度120+の敵はPhase Door(2マス)では逃げきれない → Teleport優先
+      const dangerIsFast = dangerMon.speed >= 120;
+      if (dangerIsFast || state.depth >= 18) {
+        const teleSlotFast = findTeleportScroll(inv);
+        if (teleSlotFast !== null) {
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+          addLesson(state.turn, state.depth, "危険敵回避",
+            `${dangerMon.name}(Lv${dangerMon.level},spd${dangerMon.speed})接近。Teleportで確実離脱`);
+          state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotFast });
+          stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
           continue;
         }
       }
@@ -2016,8 +2146,10 @@ async function playGame() {
               continue;
             }
           }
-          // 10回以上 → もう逃げても無駄。forceFight登録して戦闘に移行 (速度130+は除外)
-          if (adjFleeCount >= 10 && !(target.speed >= 130 && (target.level >= p.level * 0.7 || target.level >= 15))) {
+          // 10回以上 → もう逃げても無駄。forceFight登録して戦闘に移行 (強敵は除外)
+          const adjTooStrong = (target.speed >= 130 && (target.level >= p.level * 0.7 || target.level >= 15)) ||
+            (target.isUnique && target.maxhp > 200) || (target.isUnique && target.level > p.level + 3);
+          if (adjFleeCount >= 10 && !adjTooStrong) {
             forceFightMonsters.add(target.name);
             fleeCountByMonster.delete(target.name);
             // shouldFleeが次回からfalseになるので、以降は戦闘に落ちる
@@ -2036,11 +2168,24 @@ async function playGame() {
           }
         }
 
+        // 速度120+敵 or DL18+では包囲時もTeleport優先
+        const hasFastAdjacent = adjacentMonsters.some((m: any) => m.speed >= 120);
+        if (hasFastAdjacent || state.depth >= 18) {
+          const teleSlotSurr = findTeleportScroll(inv);
+          if (teleSlotSurr !== null) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "包囲逃走",
+              `隣接敵${adjacentMonsters.length}体(高速敵あり)、HP${Math.round(hpPct*100)}%。Teleportで脱出`);
+            state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotSurr });
+            stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+            continue;
+          }
+        }
         const phaseSlot = findPhaseScroll(inv);
         if (phaseSlot !== null) {
           fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
           addLesson(state.turn, state.depth, "包囲逃走",
-            `隣接敵${adjacentMonsters.length}体、HP${Math.round(hpPct*100)}%。包囲は危険、即逃走`);
+            `隣接敵${adjacentMonsters.length}体、HP${Math.round(hpPct*100)}%。Phase Doorで退避`);
           state = await sendCommand({ type: CMD.READ, itemIndex: phaseSlot });
           continue;
         }
@@ -2116,6 +2261,12 @@ async function playGame() {
     if (adjacentMonsters.length === 0 && nearMonCount <= 1) {
       const currentTile2 = tiles.find((t: any) => t.x === px && t.y === py);
       if (currentTile2?.hasObj) {
+        // Pack full check: skip pickup if inventory is full (23 slots max)
+        const MAX_PACK = 23;
+        if (inv.length >= MAX_PACK) {
+          // Don't try to pick up — move on to avoid stuck loop
+          // (future: drop lowest-value item to make room)
+        } else {
         const prevInvCount = inv.length;
         state = await sendCommand({ type: CMD.PICKUP });
         const newInv = state.player.inventory;
@@ -2145,6 +2296,7 @@ async function playGame() {
         }
         continue;
       }
+      } // end pack full else
     }
 
     // === 優先度5: 接近中の敵への対応 (BFS到達可能 + 安全な敵のみ) ===
@@ -2208,8 +2360,8 @@ async function playGame() {
 
     // 6b: 足元アイテム拾い + 装備比較
     const currentTile = tiles.find((t: any) => t.x === px && t.y === py);
-    if (currentTile?.hasObj) {
-      // フロアにアイテムあり → 拾う
+    if (currentTile?.hasObj && inv.length < 23) {
+      // フロアにアイテムあり → 拾う (pack full時はスキップ)
       const prevInvCount = inv.length;
       state = await sendCommand({ type: CMD.PICKUP });
       const newInv = state.player.inventory;
@@ -2294,6 +2446,19 @@ async function playGame() {
       && teleCount >= minTeleForEscape;
     const escapeOk = state.depth < 8 || hasEscapeMeans || tooLongOnLevel;
 
+    // 耐性カバレッジ: ソフトゲート — 耐性不足時は最低撃破数/滞在ターンを引き上げ
+    // 完全ブロックだと耐性装備が出ないSeedで詰む
+    const BASE_ELEMS = ["ACID", "ELEC", "FIRE", "COLD"];
+    const baseResistCount = BASE_ELEMS.filter(e => playerResists.has(e)).length;
+    const hasPoisRes = playerResists.has("POIS");
+    const resistTarget = state.depth < 20 ? 0 :
+      state.depth < 30 ? 2 :
+      state.depth < 40 ? 4 : 4;  // 目標耐性数
+    const resistDeficit = Math.max(0, resistTarget - baseResistCount - (hasPoisRes ? 0 : (state.depth >= 30 ? 1 : 0)));
+    // 耐性不足1つにつき追加3000ターン滞在 (探索/レベリングで補填)
+    const resistPenaltyTurns = resistDeficit * 3000;
+    const resistOk = resistDeficit === 0;
+
     // CLが低すぎる場合は降下を控える (DLとCLの乖離チェック — 深層ではより厳しく)
     // DL30+で比率引き上げ。DL30でCL24必要(0.8), DL20でCL16(0.8), DL10でCL8(0.75)
     const minClRatio = state.depth >= 30 ? 0.8 : state.depth >= 20 ? 0.8 : state.depth >= 10 ? 0.75 : 0.6;
@@ -2303,7 +2468,9 @@ async function playGame() {
     // ただし超長期滞在(2x閾値)ではCLチェックも緩和
     const veryLongOnLevel = turnsOnLevel > tooLongThreshold * 2;
     const clCheck = clOk || veryLongOnLevel;
-    const readyToDescend = hpPct >= 0.7 && healingOk && escapeOk &&
+    // 耐性ソフトゲート: 不足分×3000ターン追加滞在で降下許可
+    const resistCheck = resistOk || turnsOnLevel > resistPenaltyTurns;
+    const readyToDescend = hpPct >= 0.7 && healingOk && escapeOk && resistCheck &&
       ((clCheck && (enoughKills || explorationStalled || tooLongOnLevel || overleveled)) || lowExplorationEarlyDescent);
 
     if (readyToDescend) {
@@ -2312,7 +2479,7 @@ async function playGame() {
         const onStair = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
         if (onStair) {
           addLesson(state.turn, state.depth, "降下",
-            `DL${state.depth}→DL${state.depth+1}。HP${Math.round(hpPct*100)}%、撃破${killsThisLevel}体。条件満たして降下`);
+            `DL${state.depth}→DL${state.depth+1}。HP${Math.round(hpPct*100)}%、撃破${killsThisLevel}体、耐性${baseResistCount}/4+毒${hasPoisRes ? "○" : "×"}。降下`);
           state = await sendCommand({ type: CMD.GO_DOWN });
           if (state.depth > maxDepthReached) {
             maxDepthReached = state.depth;

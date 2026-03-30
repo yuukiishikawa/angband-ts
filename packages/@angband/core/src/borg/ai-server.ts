@@ -1083,26 +1083,41 @@ function upgradeEquipmentOnDescent(player: Player, kinds: readonly ObjectKind[])
 
   // Depth-gated equipment upgrades
   const upgrades: { minDepth: number; tval: number; name: string; toH?: number; toD?: number; toA?: number; modifiers?: Record<number, number> }[] = [
-    // DL15: Katana (3d5), Augmented Chain Mail (AC 42)
+    // DL10: STR+2 gloves
+    { minDepth: 10, tval: 11, name: "Set of Caestus", toA: 2, modifiers: { 0: 2 } }, // STR+2
+    // DL15: Katana, Augmented Chain Mail, Fire+Cold cloak, DEX+SPEED boots
     { minDepth: 15, tval: 9, name: "Katana", toH: 8, toD: 8 },
     { minDepth: 15, tval: 17, name: "Augmented Chain Mail", toA: 5 },
-    { minDepth: 15, tval: 10, name: "Pair of Steel Shod Boots", toA: 3 },
-    // DL25: Executioner's Sword (4d5), Full Plate (AC 62), speed boots
+    { minDepth: 15, tval: 15, name: "Cloak", toA: 3, elInfo: { 2: 1, 3: 1 } }, // RES_FIRE + RES_COLD
+    { minDepth: 15, tval: 10, name: "Pair of Steel Shod Boots", toA: 3, modifiers: { 3: 2, 9: 1 } }, // DEX+2, SPEED+1
+    // DL25: Executioner's Sword, Full Plate, STR+5 gauntlets (compensate for heavy weapon)
     { minDepth: 25, tval: 9, name: "Executioner's Sword", toH: 10, toD: 10 },
     { minDepth: 25, tval: 17, name: "Full Plate Armour", toA: 8 },
-    // DL35: weapon + speed modifier
+    { minDepth: 25, tval: 11, name: "Set of Gauntlets", toA: 4, modifiers: { 0: 5, 3: 2 } }, // STR+5, DEX+2
+    // DL30: Acid+Elec shield, Poison+Speed boots
+    { minDepth: 30, tval: 14, name: "Large Metal Shield", toA: 6, elInfo: { 0: 1, 1: 1 } }, // RES_ACID + RES_ELEC
+    { minDepth: 30, tval: 10, name: "Pair of Iron Shod Boots", toA: 5, modifiers: { 0: 2, 9: 2 }, elInfo: { 4: 1 } }, // STR+2, SPEED+2, RES_POIS
+    // DL35: Mace of Disruption, STR+6 gauntlets, SPEED+3 boots
     { minDepth: 35, tval: 7, name: "Mace of Disruption", toH: 12, toD: 12 },
-    // DL45: top-tier
+    { minDepth: 35, tval: 11, name: "Set of Caestus", toA: 5, modifiers: { 0: 6, 3: 3, 9: 1 } }, // STR+6, DEX+3, SPEED+1
+    { minDepth: 35, tval: 10, name: "Pair of Steel Shod Boots", toA: 5, modifiers: { 0: 2, 3: 2, 9: 3 } }, // STR+2, DEX+2, SPEED+3
+    // DL40: Full resist armor, better helm
+    { minDepth: 40, tval: 17, name: "Mithril Plate Mail", toA: 10, elInfo: { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1 } }, // All base + POIS
+    { minDepth: 40, tval: 12, name: "Iron Helm", toA: 8, modifiers: { 0: 3, 4: 3 } }, // STR+3, CON+3
+    // DL45: top-tier everything
     { minDepth: 45, tval: 9, name: "Blade of Chaos", toH: 15, toD: 15 },
-    { minDepth: 45, tval: 17, name: "Adamantite Plate Mail", toA: 10 },
+    { minDepth: 45, tval: 17, name: "Adamantite Plate Mail", toA: 12, elInfo: { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 7: 1, 8: 1 } },
+    { minDepth: 45, tval: 11, name: "Set of Mithril Gauntlets", toA: 6, modifiers: { 0: 7, 3: 4, 9: 2 } }, // STR+7, DEX+4, SPEED+2
+    { minDepth: 45, tval: 10, name: "Pair of Mithril Shod Boots", toA: 6, modifiers: { 0: 3, 3: 3, 9: 4 } }, // STR+3, DEX+3, SPEED+4
+    { minDepth: 45, tval: 12, name: "Iron Crown", toA: 10, modifiers: { 0: 4, 4: 4, 9: 2 } }, // STR+4, CON+4, SPEED+2
   ];
 
   for (const upgrade of upgrades) {
     if (depth < upgrade.minDepth) continue;
-    // Only give once per threshold (check if already in inventory or equipped)
-    const hasItem = pGear.inventory.some(i => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase());
+    // Check if already in inventory or equipped (by tval+name)
+    const hasItem = pGear.inventory.some(i => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase() && i.tval === upgrade.tval);
     const equipment = (player as any).equipment ?? [];
-    const equipped = equipment.some((i: ObjectType | null) => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase());
+    const equipped = equipment.some((i: ObjectType | null) => i && i.kind && cleanName(i.kind.name) === upgrade.name.toLowerCase() && i.tval === upgrade.tval);
     if (hasItem || equipped) continue;
 
     const kind = kinds.find(k => k.tval === upgrade.tval && cleanName(k.name) === upgrade.name.toLowerCase());
@@ -1116,6 +1131,15 @@ function upgradeEquipmentOnDescent(player: Player, kinds: readonly ObjectKind[])
       if (!obj.modifiers) (obj as any).modifiers = new Array(14).fill(0);
       for (const [idx, val] of Object.entries(upgrade.modifiers)) {
         (obj as any).modifiers[Number(idx)] = val;
+      }
+    }
+    // Set element resistances if specified (e.g. {0:1, 2:1} = ACID+FIRE resist)
+    if ((upgrade as any).elInfo) {
+      if (!obj.elInfo || obj.elInfo.length === 0) {
+        (obj as any).elInfo = Array.from({length: 25}, () => ({ resLevel: 0, flags: new BitFlag(8) }));
+      }
+      for (const [elem, level] of Object.entries((upgrade as any).elInfo)) {
+        (obj as any).elInfo[Number(elem)] = { resLevel: level, flags: new BitFlag(8) };
       }
     }
     pGear.inventory.push(obj);
@@ -1132,7 +1156,7 @@ function giveBonusItems(player: Player, kinds: readonly ObjectKind[]): void {
     { tval: 17, name: "Metal Brigandine Armour", qty: 1, toA: 5 },
     { tval: 14, name: "Small Metal Shield", qty: 1, toA: 5 },
     { tval: 12, name: "Iron Helm", qty: 1, toA: 3 },
-    { tval: 11, name: "Set of Leather Gloves", qty: 1, toA: 2 },
+    { tval: 11, name: "Set of Leather Gloves", qty: 1, toA: 2, modifiers: { 0: 3, 3: 1 } }, // STR+3, DEX+1
     { tval: 10, name: "Pair of Iron Shod Boots", qty: 1, toA: 2 },
     { tval: 15, name: "Cloak", qty: 1, toA: 2 },
     { tval: 28, name: "Ration of Food", qty: 10 },
@@ -1155,6 +1179,13 @@ function giveBonusItems(player: Player, kinds: readonly ObjectKind[]): void {
       if ((bonus as {toH?:number}).toH !== undefined) (obj as {toH:number}).toH = (bonus as {toH:number}).toH;
       if ((bonus as {toD?:number}).toD !== undefined) (obj as {toD:number}).toD = (bonus as {toD:number}).toD;
       if ((bonus as {toA?:number}).toA !== undefined) (obj as {toA:number}).toA = (bonus as {toA:number}).toA;
+      // Set modifiers (STR, DEX, SPEED, etc.)
+      if ((bonus as any).modifiers) {
+        if (!obj.modifiers) (obj as any).modifiers = new Array(16).fill(0);
+        for (const [idx, val] of Object.entries((bonus as any).modifiers)) {
+          (obj as any).modifiers[Number(idx)] = val;
+        }
+      }
       pGear.inventory.push(obj);
     } else {
       console.log(`[WARN] Bonus item not found: tval=${bonus.tval} name="${bonus.name}"`);

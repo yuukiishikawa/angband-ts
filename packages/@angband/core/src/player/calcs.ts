@@ -35,6 +35,8 @@ const OF_DIG_3 = 34;
 
 /** ObjectModifier index for TUNNEL */
 const OMOD_TUNNEL = 8;
+/** ObjectModifier index for SPEED */
+const OMOD_SPEED = 9;
 
 // ── Stat tables (from C player-calcs.c) ──
 
@@ -272,18 +274,8 @@ export function calcBonuses(player: Player): PlayerState {
     statInd[i] = adjStatToIndex(use);
   }
 
-  // Apply stat-based bonuses to AC, to-hit, to-damage
-  toA += adjDexTa[statInd[Stat.DEX]]!;
-  toD += adjStrTd[statInd[Stat.STR]]!;
-  toH += adjDexTh[statInd[Stat.DEX]]!;
-  toH += adjStrTh[statInd[Stat.STR]]!;
-
-  // Apply stat-based skill bonuses
-  skills[Skill.DISARM_PHYS] += adjDexDis[statInd[Stat.DEX]]!;
-  skills[Skill.DISARM_MAGIC] += adjIntDis[statInd[Stat.INT]]!;
-  skills[Skill.DEVICE] += adjIntDev[statInd[Stat.INT]]!;
-  skills[Skill.SAVE] += adjWisSav[statInd[Stat.WIS]]!;
-  skills[Skill.DIGGING] += adjStrDig[statInd[Stat.STR]]!;
+  // Note: stat-based bonuses (toA/toH/toD, skills) are applied AFTER equipment
+  // loop, because equipment modifiers change stat values.
 
   // Per-level skill bonuses from class
   for (let i = 0; i < SKILL_MAX; i++) {
@@ -334,6 +326,19 @@ export function calcBonuses(player: Player): PlayerState {
       if (item.modifiers && item.modifiers[OMOD_TUNNEL]) {
         skills[Skill.DIGGING]! += item.modifiers[OMOD_TUNNEL]!;
       }
+
+      // SPEED modifier adds to player speed
+      if (item.modifiers && item.modifiers[OMOD_SPEED]) {
+        speed += item.modifiers[OMOD_SPEED]!;
+      }
+
+      // Stat modifiers (STR=0, INT=1, WIS=2, DEX=3, CON=4) add to statAdd
+      if (item.modifiers) {
+        for (let s = 0; s < STAT_MAX && s < item.modifiers.length; s++) {
+          const mod = item.modifiers[s];
+          if (mod) statAdd[s] += mod;
+        }
+      }
     }
   }
 
@@ -357,6 +362,24 @@ export function calcBonuses(player: Player): PlayerState {
     }
     skills[Skill.DIGGING]! += bestDigBonus;
   }
+
+  // Recalculate stat values with equipment modifiers included
+  for (let i = 0; i < STAT_MAX; i++) {
+    statTop[i] = modifyStatValue(player.statMax[i]!, statAdd[i]);
+    const use = modifyStatValue(player.statCur[i]!, statAdd[i]);
+    statUse[i] = use;
+    statInd[i] = adjStatToIndex(use);
+  }
+
+  // Apply stat-based bonuses (now includes equipment stat modifiers)
+  toA += adjDexTa[statInd[Stat.DEX]]!;
+  toD += adjStrTd[statInd[Stat.STR]]!;
+  toH += adjDexTh[statInd[Stat.DEX]]! + adjStrTh[statInd[Stat.STR]]!;
+  skills[Skill.DISARM_PHYS] += adjDexDis[statInd[Stat.DEX]]!;
+  skills[Skill.DISARM_MAGIC] += adjIntDis[statInd[Stat.INT]]!;
+  skills[Skill.DEVICE] += adjIntDev[statInd[Stat.INT]]!;
+  skills[Skill.SAVE] += adjWisSav[statInd[Stat.WIS]]!;
+  skills[Skill.DIGGING] += adjStrDig[statInd[Stat.STR]]!;
 
   // Number of blows — calculate from weapon weight, STR, DEX, class
   let numBlows = 100; // 1 blow if unarmed
