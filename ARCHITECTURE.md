@@ -1,8 +1,8 @@
-# Angband-TS アーキテクチャ図
+# Angband-TS Architecture Diagrams
 
-## 1. クラス図（型・インターフェース関係）
+## 1. Class Diagrams (Types & Interface Relationships)
 
-### 1-1. コアエンティティ関係図
+### 1-1. Core Entity Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -114,7 +114,7 @@ classDiagram
     ClassMagic "1" --> "*" ClassSpell : books.spells
 ```
 
-### 1-2. モンスター型関係図
+### 1-2. Monster Type Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -184,7 +184,7 @@ classDiagram
     MonsterRace "1" --> "*" MonsterDrop : drops
 ```
 
-### 1-3. ダンジョン（Chunk/Square）型関係図
+### 1-3. Dungeon (Chunk/Square) Type Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -249,7 +249,7 @@ classDiagram
     Square ..> SquareFlag : info flags
 ```
 
-### 1-4. Web UIレイヤー クラス図
+### 1-4. Web UI Layer Class Diagram
 
 ```mermaid
 classDiagram
@@ -321,7 +321,7 @@ classDiagram
     CanvasRenderer --> Terminal : render()
 ```
 
-### 1-5. コマンドシステム型関係図
+### 1-5. Command System Type Relationship Diagram
 
 ```mermaid
 classDiagram
@@ -383,9 +383,9 @@ classDiagram
 
 ---
 
-## 2. シーケンス図
+## 2. Sequence Diagrams
 
-### 2-1. メインゲームループ（1ターンの流れ）
+### 2-1. Main Game Loop (Flow of One Turn)
 
 ```mermaid
 sequenceDiagram
@@ -406,7 +406,7 @@ sequenceDiagram
     FOV-->>GL: FOV flags updated (SEEN/VIEW)
 
     GL->>EB: emit(REFRESH)
-    EB-->>GB: → drawAll() + doRender()
+    EB-->>GB: -> drawAll() + doRender()
 
     alt player.energy >= MOVE_ENERGY
         GL->>PP: processPlayer(state, input)
@@ -472,7 +472,7 @@ sequenceDiagram
     end
 ```
 
-### 2-2. 起動〜ゲーム開始シーケンス
+### 2-2. Startup to Game Start Sequence
 
 ```mermaid
 sequenceDiagram
@@ -488,7 +488,7 @@ sequenceDiagram
     M->>M: setupCanvas()
     M->>M: buildDefaultFeatureInfo()
 
-    par データ並列ロード
+    par Parallel data loading
         M->>FS: fetch p_race.json
         M->>FS: fetch class.json
         M->>FS: fetch monster.json
@@ -503,27 +503,27 @@ sequenceDiagram
 
     M->>M: RNG.stateInit(Date.now())
 
-    alt セーブデータあり
+    alt Save data exists
         M->>M: tryLoadSavedGame(rng)
-        alt ロード成功
+        alt Load successful
             M->>M: askContinue(canvas)
-            alt 続行
+            alt Continue
                 M->>M: state = loadedState
-            else 新規
+            else New game
                 M->>M: clearSave()
                 M->>BS: runBirthScreen(canvas, races, classes)
             end
-        else ロード失敗
+        else Load failed
             M->>BS: runBirthScreen(canvas, races, classes)
         end
-    else セーブなし
+    else No save data
         M->>BS: runBirthScreen(canvas, races, classes)
     end
 
-    BS->>BS: Phase 0: タイトル画面
-    BS->>BS: Phase 1: 種族選択 (11種族)
-    BS->>BS: Phase 2: 職業選択 (9職業)
-    BS->>BS: Phase 3: 名前入力
+    BS->>BS: Phase 0: Title screen
+    BS->>BS: Phase 1: Race selection (11 races)
+    BS->>BS: Phase 2: Class selection (9 classes)
+    BS->>BS: Phase 3: Name input
     BS-->>M: BirthResult {name, race, class}
 
     M->>B: createPlayer(name, race, class, rng)
@@ -531,20 +531,20 @@ sequenceDiagram
     B-->>M: Player (Lv1)
 
     M->>DG: generateDungeon(depth=1, config, rng, monsterRaces)
-    DG->>DG: createChunk → fillWithWalls
-    DG->>DG: carve rooms → dig tunnels
+    DG->>DG: createChunk -> fillWithWalls
+    DG->>DG: carve rooms -> dig tunnels
     DG->>DG: placeStairs / populateMonsters / populateObjects
-    DG-->>M: Chunk (monsters付き)
+    DG-->>M: Chunk (with monsters)
 
     M->>M: createGameState(player, chunk, rng, monsterRaces)
     M->>GB: new GameBridge(canvas, state, input)
     M->>GB: bridge.start()
     GB->>GB: subscribe events (REFRESH, HP, MANA, ...)
     GB->>GL: runGameLoop(state, this)
-    Note over GL: ゲームループ開始
+    Note over GL: Game loop starts
 ```
 
-### 2-3. モンスター近接攻撃シーケンス
+### 2-3. Monster Melee Attack Sequence
 
 ```mermaid
 sequenceDiagram
@@ -560,19 +560,19 @@ sequenceDiagram
     PM->>MT: monsterTakeTurn(chunk, mon, playerLoc, rng)
     MT->>MT: check: sleep? held? stunned? confused?
     MT->>MT: calculate distance (Chebyshev)
-    alt distance <= 1 かつ !NEVER_BLOW
+    alt distance <= 1 and !NEVER_BLOW
         MT-->>PM: {type: "attack", target: playerLoc}
     end
 
     PM->>MA: monsterAttackPlayer(mon, player, rng)
 
     alt NEVER_BLOW flag
-        MA-->>PM: [] (空配列)
+        MA-->>PM: [] (empty array)
     end
 
-    loop 各blow in mon.race.blows
+    loop each blow in mon.race.blows
         alt blow.method == NONE
-            Note over MA: break (攻撃リスト終端)
+            Note over MA: break (end of attack list)
         end
 
         MA->>RB: resolveBlowMethod(method, effect, mon, playerAc, rng)
@@ -583,9 +583,9 @@ sequenceDiagram
         TH-->>RB: hit: boolean
         RB-->>MA: hit
 
-        alt 命中
+        alt Hit
             MA->>CD: calculateBlowDamage(blow, rlev, mon, rng)
-            CD->>CD: randcalc(blow.dice) ± stun penalty
+            CD->>CD: randcalc(blow.dice) +/- stun penalty
             CD-->>MA: rawDamage
 
             MA->>RE: resolveBlowEffect(effect, rawDamage, playerAc)
@@ -594,14 +594,14 @@ sequenceDiagram
             RE-->>MA: {damage, statusEffect, message}
 
             MA->>MA: monsterCritical(dice, rlev, damage, rng)
-        else ミス
+        else Miss
             MA->>MA: miss message
         end
     end
 
     MA-->>PM: AttackResult[]
 
-    PM->>PM: totalDamage = Σ result.damage
+    PM->>PM: totalDamage = sum of result.damage
     PM->>GS: player.chp -= totalDamage
     alt player.chp <= 0
         PM->>GS: player.isDead = true
@@ -610,7 +610,7 @@ sequenceDiagram
     end
 ```
 
-### 2-4. ダンジョン生成シーケンス
+### 2-4. Dungeon Generation Sequence
 
 ```mermaid
 sequenceDiagram
@@ -624,35 +624,35 @@ sequenceDiagram
     participant PO as populateObjects
 
     GD->>CC: createChunk(height, width, depth)
-    CC-->>GD: Chunk (空グリッド)
+    CC-->>GD: Chunk (empty grid)
 
     GD->>GD: fillWithWalls(chunk)
-    Note over GD: 外壁=PERM, 内部=GRANITE
+    Note over GD: Outer walls=PERM, Interior=GRANITE
 
-    loop roomAttempts回
+    loop roomAttempts times
         GD->>GD: pick random center + builder
         GD->>RG: generateSimpleRoom / OverlappingRoom / CrossRoom / etc.
         RG->>RG: carve floor, set ROOM flag
         RG-->>GD: Room {center, bounds}
     end
 
-    loop 部屋を順番に接続
+    loop Connect rooms in order
         GD->>TN: digTunnel(room[i].center, room[i+1].center)
-        TN->>TN: L字掘削 (水平→垂直 or 垂直→水平)
-        TN->>TN: GRANITE → FLOOR, ドア配置
+        TN->>TN: L-shaped excavation (horizontal->vertical or vertical->horizontal)
+        TN->>TN: GRANITE -> FLOOR, place doors
     end
 
     GD->>PS: placeStairs(chunk, upLoc, downLoc)
-    PS->>PS: FLOOR → LESS (上り), FLOOR → MORE (下り)
+    PS->>PS: FLOOR -> LESS (up stairs), FLOOR -> MORE (down stairs)
 
     GD->>PP: populateMonsters(chunk, depth, density, races, rng)
-    loop density回
+    loop density times
         PP->>PP: findEmptyFloor(chunk, rng)
         PP->>MK: pickMonsterRace(depth, races, rng)
-        MK-->>PP: MonsterRace (深度・レア度重み付き)
+        MK-->>PP: MonsterRace (weighted by depth and rarity)
         PP->>MK: placeNewMonster(chunk, pos, race, ...)
         MK->>MK: createMonster(race, rng)
-        Note over MK: HP, speed, sleep, energy初期化
+        Note over MK: Initialize HP, speed, sleep, energy
         MK->>MK: square.mon = midx, chunk.monMax++
         MK->>MK: race.curNum++
         MK-->>PP: Monster
@@ -667,125 +667,125 @@ sequenceDiagram
 
 ---
 
-## 3. 状態遷移図
+## 3. State Transition Diagrams
 
-### 3-1. ゲーム全体の状態遷移
+### 3-1. Overall Game State Transitions
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TitleScreen : アプリ起動
+    [*] --> TitleScreen : App launch
 
     TitleScreen --> SaveCheck : Press any key
 
     state SaveCheck <<choice>>
-    SaveCheck --> ContinuePrompt : セーブあり
-    SaveCheck --> CharacterCreation : セーブなし
+    SaveCheck --> ContinuePrompt : Save exists
+    SaveCheck --> CharacterCreation : No save
 
-    ContinuePrompt --> GameLoop : 続行 (C)
-    ContinuePrompt --> CharacterCreation : 新規 (N)
+    ContinuePrompt --> GameLoop : Continue (C)
+    ContinuePrompt --> CharacterCreation : New game (N)
 
     state CharacterCreation {
         [*] --> RaceSelect
-        RaceSelect --> ClassSelect : 種族決定
-        ClassSelect --> NameInput : 職業決定
-        NameInput --> [*] : 名前決定
+        RaceSelect --> ClassSelect : Race selected
+        ClassSelect --> NameInput : Class selected
+        NameInput --> [*] : Name confirmed
     }
 
-    CharacterCreation --> DungeonGeneration : Player作成
+    CharacterCreation --> DungeonGeneration : Player created
 
-    DungeonGeneration --> GameLoop : Chunk生成完了
+    DungeonGeneration --> GameLoop : Chunk generation complete
 
     state GameLoop {
         [*] --> FOVUpdate
         FOVUpdate --> WaitInput : energy >= 100
         FOVUpdate --> MonsterPhase : energy < 100
 
-        WaitInput --> CommandExec : GameCommand受信
-        CommandExec --> DeathCheck1 : コマンド実行
+        WaitInput --> CommandExec : GameCommand received
+        CommandExec --> DeathCheck1 : Command executed
 
-        DeathCheck1 --> MonsterPhase : 生存
+        DeathCheck1 --> MonsterPhase : Alive
         DeathCheck1 --> Dead : HP <= 0
 
-        MonsterPhase --> DeathCheck2 : モンスター処理完了
-        DeathCheck2 --> WorldPhase : 生存
+        MonsterPhase --> DeathCheck2 : Monster processing complete
+        DeathCheck2 --> WorldPhase : Alive
         DeathCheck2 --> Dead : HP <= 0
 
-        WorldPhase --> EnergyGrant : HP/MP回復, 空腹, 時限効果
+        WorldPhase --> EnergyGrant : HP/MP regen, hunger, timed effects
         EnergyGrant --> TurnIncrement : energy += turnEnergy(speed)
         TurnIncrement --> LevelCheck : turn++
 
-        LevelCheck --> FOVUpdate : 同じ階
-        LevelCheck --> LevelTransition : 階段使用
+        LevelCheck --> FOVUpdate : Same floor
+        LevelCheck --> LevelTransition : Stairs used
     }
 
     state LevelTransition {
-        [*] --> CurNumReset : 旧モンスターcurNum--
+        [*] --> CurNumReset : Old monsters curNum--
         CurNumReset --> NewDungeon : generateDungeon()
-        NewDungeon --> PlayerPlace : 階段位置に配置
-        PlayerPlace --> [*] : state更新
+        NewDungeon --> PlayerPlace : Place at stairs location
+        PlayerPlace --> [*] : State updated
     }
 
-    LevelTransition --> GameLoop : 新レベル開始
+    LevelTransition --> GameLoop : New level starts
 
     state Dead {
-        [*] --> Tombstone : 墓碑表示
+        [*] --> Tombstone : Display tombstone
         Tombstone --> [*] : any key
     }
 
     state Victory {
-        [*] --> VictoryScreen : 勝利メッセージ
+        [*] --> VictoryScreen : Victory message
         VictoryScreen --> [*] : any key
     }
 
     GameLoop --> Dead : player.isDead
     GameLoop --> Victory : player.totalWinner
-    Dead --> [*] : セーブ削除
-    Victory --> [*] : セーブ削除
+    Dead --> [*] : Save deleted
+    Victory --> [*] : Save deleted
 ```
 
-### 3-2. モンスターAI 状態遷移
+### 3-2. Monster AI State Transitions
 
 ```mermaid
 stateDiagram-v2
     [*] --> CheckSleep : monsterTakeTurn()
 
-    CheckSleep --> Idle : 睡眠中 (mTimed[SLEEP] > 0)
+    CheckSleep --> Idle : Sleeping (mTimed[SLEEP] > 0)
     Note right of Idle : sleep--
 
-    CheckSleep --> CheckHold : 起きている
+    CheckSleep --> CheckHold : Awake
 
-    CheckHold --> Idle : 拘束中 (mTimed[HOLD] > 0)
-    CheckHold --> CheckStun : 自由
+    CheckHold --> Idle : Held (mTimed[HOLD] > 0)
+    CheckHold --> CheckStun : Free
 
-    CheckStun --> Idle : 朦朧 + 50%失敗
-    CheckStun --> CheckConfusion : 行動可能
+    CheckStun --> Idle : Stunned + 50% failure
+    CheckStun --> CheckConfusion : Can act
 
-    CheckConfusion --> RandomMove : 混乱中
-    CheckConfusion --> CheckRandomFlags : 正常
+    CheckConfusion --> RandomMove : Confused
+    CheckConfusion --> CheckRandomFlags : Normal
 
     CheckRandomFlags --> RandomMove : RAND_50 (50%) or RAND_25 (25%)
-    CheckRandomFlags --> CheckFear : 通常移動
+    CheckRandomFlags --> CheckFear : Normal movement
 
-    CheckFear --> Flee : 恐怖状態 or FRIGHTENED flag
-    CheckFear --> CheckNeverMove : 恐怖なし
+    CheckFear --> Flee : Afraid or FRIGHTENED flag
+    CheckFear --> CheckNeverMove : Not afraid
 
     CheckNeverMove --> AdjacentCheck1 : NEVER_MOVE flag
-    CheckNeverMove --> DistanceCalc : 移動可能
+    CheckNeverMove --> DistanceCalc : Can move
 
     state AdjacentCheck1 <<choice>>
-    AdjacentCheck1 --> Attack : 隣接 & !NEVER_BLOW
-    AdjacentCheck1 --> Idle : 隣接不可
+    AdjacentCheck1 --> Attack : Adjacent & !NEVER_BLOW
+    AdjacentCheck1 --> Idle : Not adjacent
 
-    DistanceCalc --> AdjacentCheck2 : 距離計算 (Chebyshev)
+    DistanceCalc --> AdjacentCheck2 : Calculate distance (Chebyshev)
 
     state AdjacentCheck2 <<choice>>
     AdjacentCheck2 --> Attack : dist <= 1 & !NEVER_BLOW
     AdjacentCheck2 --> Flee : dist <= 1 & NEVER_BLOW
     AdjacentCheck2 --> Pathfind : dist > 1
 
-    Pathfind --> Move : 経路あり
-    Pathfind --> RandomMove : 経路なし → ランダム
-    Pathfind --> Idle : 移動先なし
+    Pathfind --> Move : Path found
+    Pathfind --> RandomMove : No path -> random
+    Pathfind --> Idle : No valid destination
 
     state ActionResult <<choice>>
     Attack --> ActionResult
@@ -793,25 +793,25 @@ stateDiagram-v2
     Flee --> ActionResult
     RandomMove --> ActionResult
     Idle --> ActionResult
-    ActionResult --> [*] : MonsterAction返却
+    ActionResult --> [*] : Return MonsterAction
 ```
 
-### 3-3. プレイヤーコマンド入力 状態遷移
+### 3-3. Player Command Input State Transitions
 
 ```mermaid
 stateDiagram-v2
     [*] --> WaitKey : getCommand()
 
-    WaitKey --> DirectionCheck : keypress受信
+    WaitKey --> DirectionCheck : Keypress received
 
     state DirectionCheck <<choice>>
-    DirectionCheck --> PendingDirCheck : 方向キー検出
-    DirectionCheck --> CommandCheck : 方向なし
+    DirectionCheck --> PendingDirCheck : Direction key detected
+    DirectionCheck --> CommandCheck : No direction
 
-    PendingDirCheck --> CompleteDirCmd : pendingCmd あり
-    PendingDirCheck --> WalkCommand : pendingCmd なし
+    PendingDirCheck --> CompleteDirCmd : pendingCmd exists
+    PendingDirCheck --> WalkCommand : No pendingCmd
 
-    CompleteDirCmd --> [*] : GameCommand (open/close/tunnel等)
+    CompleteDirCmd --> [*] : GameCommand (open/close/tunnel etc.)
     WalkCommand --> [*] : WALK {direction}
 
     state CommandCheck <<choice>>
@@ -826,52 +826,52 @@ stateDiagram-v2
     CommandCheck --> StudySelect : "study"
     CommandCheck --> SaveCmd : "save"
     CommandCheck --> SimpleCmd : "go_up/go_down/search/rest/pickup"
-    CommandCheck --> Unhandled : 未知コマンド
+    CommandCheck --> Unhandled : Unknown command
 
     HelpScreen --> WaitKey : ESC/Space/Enter
-    LookCmd --> WaitKey : メッセージ表示
+    LookCmd --> WaitKey : Display message
 
-    DirPrompt --> WaitKey : pendingDirectionCmd設定
+    DirPrompt --> WaitKey : Set pendingDirectionCmd
 
     InventoryScreen --> WaitKey : ESC/Space/Enter
     EquipScreen --> WaitKey : ESC/Space/Enter
 
     state ItemSelect {
-        [*] --> FilterItems : フィルタ適用
-        FilterItems --> ShowList : 該当アイテムあり
-        FilterItems --> NoItems : アイテムなし
-        ShowList --> LetterSelect : a-z選択
+        [*] --> FilterItems : Apply filter
+        FilterItems --> ShowList : Matching items found
+        FilterItems --> NoItems : No items
+        ShowList --> LetterSelect : Select a-z
         LetterSelect --> [*]
         NoItems --> [*]
     }
 
-    ItemSelect --> [*] : GameCommand (QUAFF/EAT/READ等)
-    ItemSelect --> WaitKey : ESC取消
+    ItemSelect --> [*] : GameCommand (QUAFF/EAT/READ etc.)
+    ItemSelect --> WaitKey : ESC cancel
 
     SpellSelect --> [*] : GameCommand (CAST)
-    SpellSelect --> WaitKey : ESC取消
+    SpellSelect --> WaitKey : ESC cancel
 
-    StudySelect --> WaitKey : 習得完了 or ESC
+    StudySelect --> WaitKey : Learning complete or ESC
 
     EquipManage --> [*] : GameCommand (EQUIP/UNEQUIP/DROP)
-    EquipManage --> WaitKey : ESC取消
+    EquipManage --> WaitKey : ESC cancel
 
-    SaveCmd --> WaitKey : localStorage保存
+    SaveCmd --> WaitKey : Save to localStorage
 
     SimpleCmd --> [*] : GameCommand
-    Unhandled --> WaitKey : エラーメッセージ
+    Unhandled --> WaitKey : Error message
 ```
 
-### 3-4. エネルギーシステム状態遷移
+### 3-4. Energy System State Transitions
 
 ```mermaid
 stateDiagram-v2
-    [*] --> EnergyGrant : ターン開始
+    [*] --> EnergyGrant : Turn start
 
     state EnergyGrant {
         [*] --> CalcEnergy
         CalcEnergy : energy += EXTRACT_ENERGY[speed]
-        Note right of CalcEnergy : テーブルは180エントリ (speed 0-179)\nspeed 110 → +10/tick
+        Note right of CalcEnergy : Table has 180 entries (speed 0-179)\nspeed 110 -> +10/tick
         CalcEnergy --> [*]
     }
 
@@ -881,8 +881,8 @@ stateDiagram-v2
     EnergyCheck --> CanAct : energy >= 100
     EnergyCheck --> WaitTick : energy < 100
 
-    CanAct --> ActionExec : コマンド/AI決定
-    ActionExec --> EnergyDeduct : 行動実行
+    CanAct --> ActionExec : Command/AI decision
+    ActionExec --> EnergyDeduct : Action executed
 
     state EnergyDeduct {
         [*] --> Deduct
@@ -890,29 +890,29 @@ stateDiagram-v2
         Deduct --> [*]
     }
 
-    EnergyDeduct --> EnergyCheck : 残エネルギー確認
-    WaitTick --> EnergyGrant : 次tick
+    EnergyDeduct --> EnergyCheck : Check remaining energy
+    WaitTick --> EnergyGrant : Next tick
 
     note right of EnergyCheck
-        速度110: 10tick で1行動
-        速度120: 5tick で1行動
-        速度130: ~3tick で1行動
-        速度 80: ~17tick で1行動
+        Speed 110: 1 action per 10 ticks
+        Speed 120: 1 action per 5 ticks
+        Speed 130: ~1 action per 3 ticks
+        Speed 80: ~1 action per 17 ticks
     end note
 ```
 
-### 3-5. セーブ/ロード状態遷移
+### 3-5. Save/Load State Transitions
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Playing : ゲーム中
+    [*] --> Playing : In game
 
     state Playing {
         [*] --> Normal
         Normal --> SaveTrigger : Ctrl+S
         SaveTrigger --> Serialize : saveGameToJSON()
         Serialize --> WriteLS : localStorage.setItem()
-        WriteLS --> Normal : "Game saved" メッセージ
+        WriteLS --> Normal : "Game saved" message
     }
 
     Playing --> Death : HP <= 0
@@ -924,23 +924,23 @@ stateDiagram-v2
 
     state StartupLoad {
         [*] --> CheckLS : localStorage.getItem()
-        CheckLS --> HasSave : JSON文字列あり
+        CheckLS --> HasSave : JSON string exists
         CheckLS --> NoSave : null
         HasSave --> Parse : JSON.parse()
         Parse --> Validate : validateSaveData()
-        Validate --> LoadOK : バージョン互換
-        Validate --> LoadFail : 不整合
-        LoadOK --> PatchRace : race/classテンプレート復元
-        PatchRace --> RestoreRNG : RNG状態復元
-        RestoreRNG --> AskContinue : 「続行/新規？」
-        AskContinue --> ResumeGame : 続行 (C)
-        AskContinue --> DiscardSave : 新規 (N)
+        Validate --> LoadOK : Version compatible
+        Validate --> LoadFail : Incompatible
+        LoadOK --> PatchRace : Restore race/class templates
+        PatchRace --> RestoreRNG : Restore RNG state
+        RestoreRNG --> AskContinue : "Continue or New?"
+        AskContinue --> ResumeGame : Continue (C)
+        AskContinue --> DiscardSave : New game (N)
         LoadFail --> DiscardSave
         DiscardSave --> NoSave
-        NoSave --> NewGame : キャラ作成へ
+        NoSave --> NewGame : Go to character creation
     }
 
-    [*] --> StartupLoad : アプリ起動
+    [*] --> StartupLoad : App launch
 
     state SaveData {
         version : "1.0.0"
@@ -955,62 +955,62 @@ stateDiagram-v2
 
 ---
 
-## 4. パッケージ構成図
+## 4. Package Structure Diagram
 
 ```mermaid
 graph TB
     subgraph "@angband/web"
-        main["main.ts<br/>エントリポイント"]
-        bridge["game-bridge.ts<br/>UI⇔コアブリッジ"]
-        kbinput["keyboard-input.ts<br/>キーボード入力"]
-        birth["birth-screen.ts<br/>キャラ作成画面"]
-        term["terminal.ts<br/>80x24文字グリッド"]
-        renderer["canvas-renderer.ts<br/>Canvas描画"]
-        colors["color-palette.ts<br/>29色定義"]
+        main["main.ts<br/>Entry point"]
+        bridge["game-bridge.ts<br/>UI-Core bridge"]
+        kbinput["keyboard-input.ts<br/>Keyboard input"]
+        birth["birth-screen.ts<br/>Character creation screen"]
+        term["terminal.ts<br/>80x24 character grid"]
+        renderer["canvas-renderer.ts<br/>Canvas rendering"]
+        colors["color-palette.ts<br/>29 color definitions"]
     end
 
     subgraph "@angband/core"
         subgraph "game/"
             state["state.ts<br/>GameState"]
-            world["world.ts<br/>ゲームループ"]
+            world["world.ts<br/>Game loop"]
             event["event.ts<br/>EventBus"]
         end
         subgraph "command/"
             core_cmd["core.ts<br/>executeCommand"]
-            movement["movement.ts<br/>移動・階段"]
-            combat["combat.ts<br/>プレイヤー攻撃"]
-            item_cmd["item.ts<br/>アイテム使用"]
-            magic_cmd["magic.ts<br/>魔法詠唱"]
+            movement["movement.ts<br/>Movement & stairs"]
+            combat["combat.ts<br/>Player attack"]
+            item_cmd["item.ts<br/>Item usage"]
+            magic_cmd["magic.ts<br/>Spellcasting"]
         end
         subgraph "monster/"
-            move["move.ts<br/>AI・移動"]
-            attack["attack.ts<br/>近接攻撃解決"]
-            make["make.ts<br/>生成・配置"]
+            move["move.ts<br/>AI & movement"]
+            attack["attack.ts<br/>Melee attack resolution"]
+            make["make.ts<br/>Spawning & placement"]
         end
         subgraph "generate/"
-            gen["generate.ts<br/>ダンジョン生成"]
-            populate["populate.ts<br/>配置処理"]
+            gen["generate.ts<br/>Dungeon generation"]
+            populate["populate.ts<br/>Placement processing"]
         end
         subgraph "cave/"
-            chunk["chunk.ts<br/>Chunk管理"]
-            square["square.ts<br/>Square操作"]
-            view["view.ts<br/>FOV計算"]
+            chunk["chunk.ts<br/>Chunk management"]
+            square["square.ts<br/>Square operations"]
+            view["view.ts<br/>FOV calculation"]
         end
         subgraph "save/"
-            save["save.ts<br/>シリアライズ"]
-            load["load.ts<br/>デシリアライズ"]
+            save["save.ts<br/>Serialization"]
+            load["load.ts<br/>Deserialization"]
         end
         subgraph "data/"
-            mloader["monster-loader.ts<br/>JSONパーサー"]
+            mloader["monster-loader.ts<br/>JSON parser"]
         end
         subgraph "player/"
-            pbirth["birth.ts<br/>Player生成"]
-            spell["spell.ts<br/>呪文管理"]
+            pbirth["birth.ts<br/>Player creation"]
+            spell["spell.ts<br/>Spell management"]
         end
         subgraph "z/"
             rng["rand.ts<br/>RNG (WELL1024a)"]
             bitflag["bitflag.ts<br/>BitFlag"]
-            color["color.ts<br/>色変換"]
+            color["color.ts<br/>Color conversion"]
         end
         subgraph "types/"
             tplayer["player.ts"]

@@ -1,89 +1,89 @@
-# Angband-TS アーキテクチャ v2
+# Angband-TS Architecture v2
 
 > 58,573 LOC / 97 source files / 54 test files / 1,443 tests passing
 > Last updated: 2026-02-27
 
 ---
 
-## 1. プロジェクト全体構成
+## 1. Overall Project Structure
 
 ```
 angband-ts/
 ├── packages/
-│   ├── @angband/core/     ← ゲームエンジン（純ロジック、DOM依存なし）
+│   ├── @angband/core/     ← Game engine (pure logic, no DOM dependency)
 │   │   ├── src/           ← 97 source + 54 test files
-│   │   └── gamedata/      ← 46 JSON（C版 .txt → JSON 変換済み）
-│   ├── @angband/renderer/ ← 仮想ターミナル＋表示ロジック
+│   │   └── gamedata/      ← 46 JSON files (converted from C version .txt → JSON)
+│   ├── @angband/renderer/ ← Virtual terminal + display logic
 │   │   └── src/           ← 3 source + 3 test files
-│   └── @angband/web/      ← ブラウザフロントエンド（Vite）
+│   └── @angband/web/      ← Browser frontend (Vite)
 │       ├── src/           ← 7 source files
-│       └── public/gamedata/ ← web用JSONコピー
+│       └── public/gamedata/ ← JSON copies for web
 ├── tools/
-│   └── data-converter/    ← C版 .txt → JSON 変換ツール
-├── vitest.config.ts       ← テスト設定（単一ルート設定）
-└── tsconfig.json          ← TypeScript設定（strict, ES2022, bundler resolution）
+│   └── data-converter/    ← C version .txt → JSON conversion tool
+├── vitest.config.ts       ← Test configuration (single root config)
+└── tsconfig.json          ← TypeScript configuration (strict, ES2022, bundler resolution)
 ```
 
-### ビルド・テスト
+### Build & Test
 
-| コマンド | 内容 |
-|----------|------|
-| `npm run build` | 全パッケージビルド（workspaces） |
-| `npm test` | Vitest 全テスト実行（58ファイル、1,443テスト） |
-| `npm run typecheck` | tsc --noEmit（型チェックのみ） |
+| Command | Description |
+|---------|-------------|
+| `npm run build` | Build all packages (workspaces) |
+| `npm test` | Run all Vitest tests (58 files, 1,443 tests) |
+| `npm run typecheck` | tsc --noEmit (type checking only) |
 | `npm run lint` | ESLint |
 
-### 技術スタック
+### Technology Stack
 
 - TypeScript 5.6+ (strict mode, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`)
-- Vitest 3.0 (テストランナー)
-- Vite 6.0 (web バンドラ)
+- Vitest 3.0 (test runner)
+- Vite 6.0 (web bundler)
 - ESM only (`"type": "module"`)
-- ランタイム依存: **ゼロ** (core/renderer は外部 npm パッケージ不要)
+- Runtime dependencies: **zero** (core/renderer require no external npm packages)
 
 ---
 
-## 2. モジュール依存レイヤー図
+## 2. Module Dependency Layer Diagram
 
 ```
-Layer 1 ─── z/               純ユーティリティ（RNG, BitFlag, Loc, Dice, Color）
-            │                 依存: なし
+Layer 1 ─── z/               Pure utilities (RNG, BitFlag, Loc, Dice, Color)
+            │                 Dependencies: none
             ▼
-Layer 2 ─── types/            共有型定義（Player, Monster, Chunk, ObjectType）
-            │                 依存: z
+Layer 2 ─── types/            Shared type definitions (Player, Monster, Chunk, ObjectType)
+            │                 Dependencies: z
             ▼
-Layer 3 ─── data/             JSONデータローダー（monster, object, vault, pit, profile）
-            cave/             ダンジョングリッド操作（Chunk, Square, FOV, Heatmap）
-            object/           アイテムシステム（inventory, gear, slays, knowledge）
-            store/            ショップシステム（売買, 在庫管理）
-            │                 依存: z, types
+Layer 3 ─── data/             JSON data loaders (monster, object, vault, pit, profile)
+            cave/             Dungeon grid operations (Chunk, Square, FOV, Heatmap)
+            object/           Item system (inventory, gear, slays, knowledge)
+            store/            Shop system (buying/selling, stock management)
+            │                 Dependencies: z, types
             ▼
-Layer 4 ─── player/           プレイヤーシステム（birth, calc, timed, spell）
-            │                 依存: z, types, cave/view, object/knowledge
+Layer 4 ─── player/           Player system (birth, calc, timed, spell)
+            │                 Dependencies: z, types, cave/view, object/knowledge
             ▼
-Layer 5 ─── monster/          モンスターAI・行動（move, attack, spell, death, make）
-            │                 依存: z, types, cave, object/make
+Layer 5 ─── monster/          Monster AI & behavior (move, attack, spell, death, make)
+            │                 Dependencies: z, types, cave, object/make
             ▼
-Layer 6 ─── effect/           エフェクトディスパッチ（heal, damage, teleport, detect...）
-            project/          投射エンジン（bolt, ball, beam, breath）
-            command/          プレイヤーコマンド（walk, attack, fire, cast, item...）
-            │                 依存: z, types, cave, object, player, monster（一部）
+Layer 6 ─── effect/           Effect dispatch (heal, damage, teleport, detect...)
+            project/          Projection engine (bolt, ball, beam, breath)
+            command/          Player commands (walk, attack, fire, cast, item...)
+            │                 Dependencies: z, types, cave, object, player, monster (partial)
             ▼
-Layer 7 ─── generate/         ダンジョン生成（room, tunnel, populate, town, vault）
-            │                 依存: z, types, cave, data, monster/make, object/make
+Layer 7 ─── generate/         Dungeon generation (room, tunnel, populate, town, vault)
+            │                 Dependencies: z, types, cave, data, monster/make, object/make
             ▼
-Layer 8 ─── game/             ゲームループ・状態管理（runGameLoop, processMonsters, world）
-            save/             セーブ・ロード（JSON シリアライズ）
-            │                 依存: 全レイヤー
+Layer 8 ─── game/             Game loop & state management (runGameLoop, processMonsters, world)
+            save/             Save & load (JSON serialization)
+            │                 Dependencies: all layers
             ▼
-Layer 9 ─── @angband/renderer 表示ロジック（Terminal, renderMap, renderSidebar）
-            @angband/web      ブラウザUI（GameBridge, Canvas, Input, BirthScreen）
-                              依存: @angband/core の全サブモジュール
+Layer 9 ─── @angband/renderer Display logic (Terminal, renderMap, renderSidebar)
+            @angband/web      Browser UI (GameBridge, Canvas, Input, BirthScreen)
+                              Dependencies: all @angband/core submodules
 ```
 
-### 循環依存
+### Circular Dependencies
 
-**型レベルの擬似循環が1つのみ（ランタイム問題なし）:**
+**Only one type-level pseudo-cycle exists (no runtime issues):**
 ```
 types/player.ts ──import type──> object/knowledge.ts
                                       │
@@ -91,561 +91,561 @@ types/player.ts ──import type──> object/knowledge.ts
                                                              │
                                                              └──import type──> types/player.ts
 ```
-全て `import type` のため TypeScript が正常に解決する。
+All are `import type`, so TypeScript resolves them correctly.
 
 ---
 
-## 3. コアモジュール詳細
+## 3. Core Module Details
 
-### 3.1 z/ — 基盤ユーティリティ（9ファイル）
+### 3.1 z/ — Foundation Utilities (9 files)
 
-| ファイル | 主要エクスポート | 役割 |
-|----------|------------------|------|
-| `rand.ts` | `RNG`, `randomValue`, `randcalc`, `damcalc`, `mBonus` | WELL1024a 乱数生成器 |
-| `bitflag.ts` | `BitFlag`, `FLAG_END`, `flagSize` | 可変長ビットフラグ |
-| `dice.ts` | `Dice` | NdS+B ダイスロール |
-| `expression.ts` | `Expression`, `ExpressionError` | データ駆動式計算式 |
-| `color.ts` | `COLOUR_*` (29定数), `angbandColorTable` | Angband カラーシステム |
-| `type.ts` | `Loc`, `loc`, `locSum`, `PointSet`, `Grouper` | 2D座標, 集合, グループ化 |
-| `queue.ts` | `Queue`, `PriorityQueue` | 汎用キュー |
-| `quark.ts` | `QuarkStore`, `QuarkId` | 文字列インターン |
+| File | Main Exports | Role |
+|------|--------------|------|
+| `rand.ts` | `RNG`, `randomValue`, `randcalc`, `damcalc`, `mBonus` | WELL1024a random number generator |
+| `bitflag.ts` | `BitFlag`, `FLAG_END`, `flagSize` | Variable-length bit flags |
+| `dice.ts` | `Dice` | NdS+B dice rolls |
+| `expression.ts` | `Expression`, `ExpressionError` | Data-driven calculation expressions |
+| `color.ts` | `COLOUR_*` (29 constants), `angbandColorTable` | Angband color system |
+| `type.ts` | `Loc`, `loc`, `locSum`, `PointSet`, `Grouper` | 2D coordinates, sets, grouping |
+| `queue.ts` | `Queue`, `PriorityQueue` | Generic queues |
+| `quark.ts` | `QuarkStore`, `QuarkId` | String interning |
 
-### 3.2 types/ — 型定義（5ファイル）
+### 3.2 types/ — Type Definitions (5 files)
 
-| ファイル | 主要型 | 概要 |
-|----------|--------|------|
-| `cave.ts` | `Chunk`, `Square`, `Heatmap`, `FeatureType`, `Feat` | ダンジョン構造 |
-| `monster.ts` | `Monster`, `MonsterRace`, `MonsterBlow`, `MonsterLore` | モンスターデータ (hearing, smell, shapes, heldObjIdx, mimickedObjIdx, minRange, bestRange含む) |
-| `player.ts` | `Player`, `PlayerRace`, `PlayerClass`, `PlayerState` | プレイヤーデータ |
-| `object.ts` | `ObjectType`, `ObjectKind`, `Artifact`, `EgoItem`, `Brand`, `Slay` | アイテムデータ |
-| `option.ts` | `OptionCategory`, `OptionIndex` | ゲームオプション |
+| File | Main Types | Overview |
+|------|------------|----------|
+| `cave.ts` | `Chunk`, `Square`, `Heatmap`, `FeatureType`, `Feat` | Dungeon structures |
+| `monster.ts` | `Monster`, `MonsterRace`, `MonsterBlow`, `MonsterLore` | Monster data (includes hearing, smell, shapes, heldObjIdx, mimickedObjIdx, minRange, bestRange) |
+| `player.ts` | `Player`, `PlayerRace`, `PlayerClass`, `PlayerState` | Player data |
+| `object.ts` | `ObjectType`, `ObjectKind`, `Artifact`, `EgoItem`, `Brand`, `Slay` | Item data |
+| `option.ts` | `OptionCategory`, `OptionIndex` | Game options |
 
-### 3.3 data/ — データローダー（9ファイル）
+### 3.3 data/ — Data Loaders (9 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `parser.ts` | 汎用テキストパーサー | COMPLETE |
-| `loader.ts` | blow_methods/effects/object_bases テキスト読込 | COMPLETE |
-| `registry.ts` | `GameData` 中央レジストリ | COMPLETE |
-| `monster-loader.ts` | monster.json/monster_base.json → MonsterRace[] | PARTIAL (spell data未パース) |
-| `object-loader.ts` | object/brand/slay/artifact/ego_item/object_base JSON | PARTIAL (activation/effect未パース — null固定) |
+| File | Role | Status |
+|------|------|--------|
+| `parser.ts` | Generic text parser | COMPLETE |
+| `loader.ts` | blow_methods/effects/object_bases text loading | COMPLETE |
+| `registry.ts` | `GameData` central registry | COMPLETE |
+| `monster-loader.ts` | monster.json/monster_base.json → MonsterRace[] | PARTIAL (spell data not parsed) |
+| `object-loader.ts` | object/brand/slay/artifact/ego_item/object_base JSON | PARTIAL (activation/effect not parsed — fixed to null) |
 | `vault-loader.ts` | vault.json → VaultTemplate[] | COMPLETE |
 | `pit-loader.ts` | pit.json → PitDefinition[] | COMPLETE |
 | `dungeon-profile-loader.ts` | dungeon_profile.json → DungeonProfile[] | COMPLETE |
 
-### 3.4 cave/ — ダンジョングリッド（7ファイル）
+### 3.4 cave/ — Dungeon Grid (7 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `chunk.ts` | Chunk生成/検証/アクセス | COMPLETE |
-| `square.ts` | Square操作/述語/フラグ | COMPLETE |
-| `features.ts` | 地形タイプ定義/登録 | COMPLETE |
-| `view.ts` | FOV計算（Symmetric Shadowcasting） | COMPLETE |
-| `heatmap.ts` | 音/匂いBFS伝播 | COMPLETE |
-| `pathfind.ts` | A*経路探索 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `chunk.ts` | Chunk creation/validation/access | COMPLETE |
+| `square.ts` | Square operations/predicates/flags | COMPLETE |
+| `features.ts` | Terrain type definitions/registration | COMPLETE |
+| `view.ts` | FOV calculation (Symmetric Shadowcasting) | COMPLETE |
+| `heatmap.ts` | Sound/scent BFS propagation | COMPLETE |
+| `pathfind.ts` | A* pathfinding | COMPLETE |
 
-### 3.5 object/ — アイテムシステム（9ファイル）
+### 3.5 object/ — Item System (9 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `gear.ts` | インベントリ/装備管理 | COMPLETE |
-| `desc.ts` | アイテム名生成 | PARTIAL (flavor未対応) |
-| `pile.ts` | オブジェクトパイル（地面上アイテム） | COMPLETE |
-| `slays.ts` | スレイ/ブランド倍率計算 | COMPLETE |
-| `knowledge.ts` | ルーン鑑定システム | PARTIAL (C版`known`オブジェクトコピーとは異なるSet\<string\>簡易設計) |
-| `make.ts` | アイテム生成（apply_magic簡易版） | PARTIAL |
-| `power.ts` | アイテムパワー計算 | COMPLETE |
-| `properties.ts` | オブジェクトプロパティ述語 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `gear.ts` | Inventory/equipment management | COMPLETE |
+| `desc.ts` | Item name generation | PARTIAL (flavors not supported) |
+| `pile.ts` | Object piles (items on the ground) | COMPLETE |
+| `slays.ts` | Slay/brand multiplier calculation | COMPLETE |
+| `knowledge.ts` | Rune identification system | PARTIAL (simplified Set\<string\> design, differs from C version's `known` object copy) |
+| `make.ts` | Item generation (simplified apply_magic) | PARTIAL |
+| `power.ts` | Item power calculation | COMPLETE |
+| `properties.ts` | Object property predicates | COMPLETE |
 
-### 3.6 player/ — プレイヤーシステム（6ファイル）
+### 3.6 player/ — Player System (6 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `birth.ts` | キャラクター作成 | PARTIAL (body簡易版, 初期装備なし) |
-| `calcs.ts` | ステータス計算 (AC, speed, blows) | PARTIAL (blows固定値) |
-| `timed.ts` | 時限効果 (毒, 加速, 盲目...) | COMPLETE |
-| `spell.ts` | 呪文管理/詠唱 | COMPLETE |
-| `util.ts` | LOS, 経験値テーブル, フラグ判定 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `birth.ts` | Character creation | PARTIAL (simplified body, no starting equipment) |
+| `calcs.ts` | Stat calculation (AC, speed, blows) | PARTIAL (blows uses fixed value) |
+| `timed.ts` | Timed effects (poison, haste, blindness...) | COMPLETE |
+| `spell.ts` | Spell management/casting | COMPLETE |
+| `util.ts` | LOS, experience tables, flag checks | COMPLETE |
 
-### 3.7 monster/ — モンスターAI（8ファイル）
+### 3.7 monster/ — Monster AI (8 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `make.ts` | モンスター生成/配置 | COMPLETE |
-| `move.ts` | AI行動決定/移動 | PARTIAL (MOVE_BODY/KILL_BODY未実装) |
-| `attack.ts` | 近接攻撃解決 | PARTIAL (6 blow effect スタブ) |
-| `spell.ts` | 呪文選択/ダメージ計算 | PARTIAL (状態異常未適用) |
-| `death.ts` | 死亡時ドロップ | COMPLETE |
-| `lore.ts` | モンスター知識蓄積 | COMPLETE |
-| `timed.ts` | モンスター時限効果 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `make.ts` | Monster generation/placement | COMPLETE |
+| `move.ts` | AI decision-making/movement | PARTIAL (MOVE_BODY/KILL_BODY not implemented) |
+| `attack.ts` | Melee attack resolution | PARTIAL (6 blow effects are stubs) |
+| `spell.ts` | Spell selection/damage calculation | PARTIAL (status effects not applied) |
+| `death.ts` | Death drops | COMPLETE |
+| `lore.ts` | Monster knowledge accumulation | COMPLETE |
+| `timed.ts` | Monster timed effects | COMPLETE |
 
-### 3.8 effect/ — エフェクトシステム（4ファイル）
+### 3.8 effect/ — Effect System (4 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `handler.ts` | エフェクト登録/ディスパッチ | COMPLETE |
-| `attack.ts` | 攻撃系エフェクト (bolt, ball, breath) | COMPLETE |
-| `general.ts` | 一般エフェクト (heal, teleport, detect) | PARTIAL (11スタブ, 73未登録) |
+| File | Role | Status |
+|------|------|--------|
+| `handler.ts` | Effect registration/dispatch | COMPLETE |
+| `attack.ts` | Attack effects (bolt, ball, breath) | COMPLETE |
+| `general.ts` | General effects (heal, teleport, detect) | PARTIAL (11 stubs, 73 unregistered) |
 
-### 3.9 command/ — コマンド（6ファイル）
+### 3.9 command/ — Commands (6 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `core.ts` | ディスパッチャ/型定義 | COMPLETE |
-| `movement.ts` | 移動/ドア/トンネル/階段 | COMPLETE |
-| `combat.ts` | 近接/射撃/投擲 | PARTIAL (投擲の着地/破損未実装) |
-| `item.ts` | アイテム使用/拾う/落とす/装備 | COMPLETE |
-| `magic.ts` | 魔法詠唱/学習 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `core.ts` | Dispatcher/type definitions | COMPLETE |
+| `movement.ts` | Movement/doors/tunneling/stairs | COMPLETE |
+| `combat.ts` | Melee/ranged/throwing | PARTIAL (thrown item landing/breakage not implemented) |
+| `item.ts` | Item use/pickup/drop/equip | COMPLETE |
+| `magic.ts` | Spell casting/learning | COMPLETE |
 
-### 3.10 generate/ — ダンジョン生成（7ファイル）
+### 3.10 generate/ — Dungeon Generation (7 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `generate.ts` | メイン生成エントリ | PARTIAL (プロファイル未接続, リトライなし) |
-| `room.ts` | 部屋生成 (6タイプ + vault + pit/nest) | PARTIAL (vault実体配置未完了) |
-| `tunnel.ts` | 通路掘削 | COMPLETE |
-| `populate.ts` | モンスター/オブジェクト/階段/罠配置 | COMPLETE |
-| `town.ts` | 町マップ生成 | PARTIAL (depth=0未接続, 店UI未連携) |
-| `test-helpers.ts` | テスト用ヘルパー | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `generate.ts` | Main generation entry point | PARTIAL (profiles not connected, no retry) |
+| `room.ts` | Room generation (6 types + vault + pit/nest) | PARTIAL (vault entity placement incomplete) |
+| `tunnel.ts` | Tunnel digging | COMPLETE |
+| `populate.ts` | Monster/object/stair/trap placement | COMPLETE |
+| `town.ts` | Town map generation | PARTIAL (depth=0 not connected, shop UI not linked) |
+| `test-helpers.ts` | Test helpers | COMPLETE |
 
-### 3.11 game/ — ゲームループ（5ファイル）
+### 3.11 game/ — Game Loop (5 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `event.ts` | EventBus (同期pub/sub) | COMPLETE |
-| `state.ts` | GameState インターフェース | COMPLETE |
-| `input.ts` | InputProvider インターフェース | COMPLETE |
-| `world.ts` | メインゲームループ | PARTIAL (自然生成空, cleanup未完全) |
+| File | Role | Status |
+|------|------|--------|
+| `event.ts` | EventBus (synchronous pub/sub) | COMPLETE |
+| `state.ts` | GameState interface | COMPLETE |
+| `input.ts` | InputProvider interface | COMPLETE |
+| `world.ts` | Main game loop | PARTIAL (natural spawning empty, cleanup incomplete) |
 
-### 3.12 store/ — ショップ（2ファイル）
+### 3.12 store/ — Shops (2 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `store.ts` | 店ロジック/在庫/売買 | COMPLETE |
+| File | Role | Status |
+|------|------|--------|
+| `store.ts` | Shop logic/stock/buying & selling | COMPLETE |
 
-### 3.13 save/ — セーブ/ロード（3ファイル）
+### 3.13 save/ — Save/Load (3 files)
 
-| ファイル | 役割 | 状態 |
-|----------|------|------|
-| `save.ts` | シリアライズ → JSON | COMPLETE |
-| `load.ts` | デシリアライズ ← JSON | PARTIAL (race/classプレースホルダー) |
-
----
-
-## 4. Web レイヤー
-
-### @angband/renderer（3ファイル）
-
-| ファイル | 役割 |
-|----------|------|
-| `terminal.ts` | 仮想文字グリッド（dirty cell tracking） |
-| `display.ts` | マップ/サイドバー/メッセージ/ステータス描画 |
-| `textblock.ts` | 色付きテキストブロック |
-
-### @angband/web（7ファイル）
-
-| ファイル | 役割 |
-|----------|------|
-| `main.ts` | エントリポイント: Canvas初期化, JSON並列ロード, セーブ確認, キャラ作成, ゲーム開始 |
-| `game-bridge.ts` | CommandInputProvider実装: ゲームループ ⇔ UI ブリッジ, キー入力→コマンド変換, Canvas描画, インベントリ/呪文メニュー, ターゲティング, パニックセーブ |
-| `keyboard-input.ts` | InputProvider実装: DOM keydown → 方向/コマンド変換, VIキー/矢印/テンキー対応 |
-| `canvas-renderer.ts` | HTML Canvas描画: dirty cell のみ再描画, monospace font |
-| `terminal.ts` | 80x24文字グリッド: putChar/putString/clear |
-| `birth-screen.ts` | キャラ作成UI: タイトル → 種族 → 職業 → 名前入力 |
-| `color-palette.ts` | Angband COLOUR_* → CSS hex マッピング |
+| File | Role | Status |
+|------|------|--------|
+| `save.ts` | Serialization → JSON | COMPLETE |
+| `load.ts` | Deserialization ← JSON | PARTIAL (race/class placeholder) |
 
 ---
 
-## 5. データフロー
+## 4. Web Layer
 
-### 5.1 起動シーケンス
+### @angband/renderer (3 files)
+
+| File | Role |
+|------|------|
+| `terminal.ts` | Virtual character grid (dirty cell tracking) |
+| `display.ts` | Map/sidebar/message/status rendering |
+| `textblock.ts` | Colored text blocks |
+
+### @angband/web (7 files)
+
+| File | Role |
+|------|------|
+| `main.ts` | Entry point: Canvas initialization, parallel JSON loading, save check, character creation, game start |
+| `game-bridge.ts` | CommandInputProvider implementation: game loop ⇔ UI bridge, key input → command conversion, Canvas rendering, inventory/spell menus, targeting, panic save |
+| `keyboard-input.ts` | InputProvider implementation: DOM keydown → direction/command conversion, VI keys/arrow/numpad support |
+| `canvas-renderer.ts` | HTML Canvas rendering: redraw dirty cells only, monospace font |
+| `terminal.ts` | 80x24 character grid: putChar/putString/clear |
+| `birth-screen.ts` | Character creation UI: title → race → class → name input |
+| `color-palette.ts` | Angband COLOUR_* → CSS hex mapping |
+
+---
+
+## 5. Data Flow
+
+### 5.1 Startup Sequence
 
 ```
 main.ts
   ├─ setupCanvas()
   ├─ buildDefaultFeatureInfo()
-  ├─ 並列fetch: p_race, class, monster, monster_base,
+  ├─ Parallel fetch: p_race, class, monster, monster_base,
   │              object, object_base, brand, slay, artifact, ego_item
   ├─ parseMonsterBases() → parseMonsterRaces()
   ├─ parseObjectBases() → parseObjectKinds() / parseBrands() / parseSlays() /
   │                        parseArtifacts() / parseEgoItems()
   ├─ RNG.stateInit(Date.now())
-  ├─ セーブチェック → 続行 or キャラ作成
+  ├─ Save check → continue or character creation
   ├─ createPlayer(name, race, class, rng)
   ├─ generateDungeon(depth, config, rng, races, kinds)
   ├─ createGameState(player, chunk, rng, races, kinds, ...)
   └─ GameBridge.start() → runGameLoop(state, this)
 ```
 
-### 5.2 ゲームループ（1ターン）
+### 5.2 Game Loop (1 turn)
 
 ```
 runGameLoop:
-  1. updateView(chunk, player.grid)      ← FOV更新
-  2. updateNoise/updateScent             ← ヒートマップ更新
-  3. eventBus.emit(REFRESH)              ← UI描画トリガー
-  4. processPlayer(state, input)         ← プレイヤー入力→コマンド実行
-     └─ await input.getCommand()         ← 非同期キー入力待ち
+  1. updateView(chunk, player.grid)      ← FOV update
+  2. updateNoise/updateScent             ← Heatmap update
+  3. eventBus.emit(REFRESH)              ← UI render trigger
+  4. processPlayer(state, input)         ← Player input → command execution
+     └─ await input.getCommand()         ← Async key input wait
      └─ executeCommand(cmd, player, chunk, rng)
-     └─ processDeadMonsters(state)       ← 死亡モンスター処理
-  5. processMonsters(state, monsters)    ← 全モンスターAI行動
+     └─ processDeadMonsters(state)       ← Dead monster processing
+  5. processMonsters(state, monsters)    ← All monster AI actions
      └─ monsterTakeTurn() → move/attack/spell/idle
-     └─ monsterAttackPlayer()            ← 近接攻撃解決
-     └─ monsterCastSpell()               ← 呪文解決
-  6. processWorld(state)                 ← HP/MP再生, 空腹, 毒, 出血, 時限効果
-  7. player.energy += turnEnergy(speed)  ← エネルギー付与
-  8. state.turn++                        ← ターンカウンタ
-  9. checkLevelChange(state)             ← 階段→レベル遷移
+     └─ monsterAttackPlayer()            ← Melee attack resolution
+     └─ monsterCastSpell()               ← Spell resolution
+  6. processWorld(state)                 ← HP/MP regen, hunger, poison, bleeding, timed effects
+  7. player.energy += turnEnergy(speed)  ← Energy grant
+  8. state.turn++                        ← Turn counter
+  9. checkLevelChange(state)             ← Stairs → level transition
 ```
 
-### 5.3 コマンド入力フロー
+### 5.3 Command Input Flow
 
 ```
 GameBridge.getCommand()
-  └─ waitForKey()                     ← Promise<void>（keydown待ち）
-  └─ input.consumeDirection()         ← 方向キー？
-      ├─ pendingDirectionCmd あり → {type: OPEN/CLOSE/TUNNEL, direction}
-      └─ なし → {type: WALK, direction}
-  └─ input.consumeCommand()           ← コマンドキー？
-      ├─ "open/close/tunnel/disarm" → pendingDirectionCmd設定 → 再ループ
-      ├─ "inventory/equipment"       → 画面表示 → 再ループ
-      ├─ "quaff/eat/read/zap/aim"    → selectInventoryItem() → コマンド
-      ├─ "cast/pray"                 → selectSpell() → waitForDirection() → コマンド
-      ├─ "fire"                      → waitForTarget() → コマンド
-      ├─ "throw"                     → selectInventoryItem() → waitForTarget() → コマンド
-      └─ "go_up/go_down/search/rest/pickup" → 即座にコマンド
+  └─ waitForKey()                     ← Promise<void> (waiting for keydown)
+  └─ input.consumeDirection()         ← Direction key?
+      ├─ pendingDirectionCmd exists → {type: OPEN/CLOSE/TUNNEL, direction}
+      └─ none → {type: WALK, direction}
+  └─ input.consumeCommand()           ← Command key?
+      ├─ "open/close/tunnel/disarm" → set pendingDirectionCmd → re-loop
+      ├─ "inventory/equipment"       → display screen → re-loop
+      ├─ "quaff/eat/read/zap/aim"    → selectInventoryItem() → command
+      ├─ "cast/pray"                 → selectSpell() → waitForDirection() → command
+      ├─ "fire"                      → waitForTarget() → command
+      ├─ "throw"                     → selectInventoryItem() → waitForTarget() → command
+      └─ "go_up/go_down/search/rest/pickup" → immediate command
 ```
 
 ---
 
-## 6. 現在のギャップ一覧
+## 6. Current Gap List
 
-### 6.1 エフェクトハンドラ
+### 6.1 Effect Handlers
 
-| 分類 | 数 |
-|------|-----|
-| 登録済み＋実動作 | 35 |
-| 登録済み＋スタブ | 11 |
-| 未登録 | 73 |
-| **合計 EffectType** | **119** |
+| Category | Count |
+|----------|-------|
+| Registered + functional | 35 |
+| Registered + stub | 11 |
+| Unregistered | 73 |
+| **Total EffectTypes** | **119** |
 
-主要スタブ: TELEPORT（地形チェック未実施）, IDENTIFY（ルーンシステム未接続）, ENCHANT/RECHARGE（メッセージのみ）, SUMMON/BANISH（モンスター操作なし）, GLYPH（地形変更なし）, CONFUSE/SLEEP（対象効果なし）
+Major stubs: TELEPORT (no terrain check), IDENTIFY (not connected to rune system), ENCHANT/RECHARGE (message only), SUMMON/BANISH (no monster operations), GLYPH (no terrain change), CONFUSE/SLEEP (no target effect)
 
-### 6.2 モンスター呪文
+### 6.2 Monster Spells
 
-- `spellFlags` / `freqInnate` / `spellPower` が常に 0/empty（monster-loader.ts でパース未実装）
-- `monsterCastSpell()` はダメージ計算のみ。状態異常・召喚・回復は未適用
-- game/world.ts のAIループには接続済みだが、データがないため実質機能しない
+- `spellFlags` / `freqInnate` / `spellPower` are always 0/empty (parsing not implemented in monster-loader.ts)
+- `monsterCastSpell()` only calculates damage. Status effects, summoning, and healing are not applied
+- Connected to the AI loop in game/world.ts, but non-functional due to missing data
 
-### 6.3 戦闘
+### 6.3 Combat
 
-- 投擲: 着地/破損/拾い直しなし
-- 盾バッシュ: 未実装
-- `visible` フラグ: 常に `true`（盲目時の命中率未反映）
+- Throwing: no landing/breakage/pickup mechanics
+- Shield bash: not implemented
+- `visible` flag: always `true` (blindness hit rate penalty not reflected)
 
-### 6.4 ダンジョン生成
+### 6.4 Dungeon Generation
 
-- プロファイル: ローダー完成、generate.ts 未接続（ハードコード設定のみ）
-- Vault: ローダー完成、room.ts でASCIIテンプレート描画済み、**エンティティ配置未実装**
-- Pit/Nest: ローダー完成、room.ts にジェネレータ存在、**generate.ts 未接続**
-- 町: generateTown() 存在、**depth=0 ルーティング未接続**
-- リトライ: なし（C版は最大100回再試行）
-- レベル感覚: フィールド存在、計算なし
+- Profiles: loader complete, not connected to generate.ts (hardcoded settings only)
+- Vaults: loader complete, ASCII template drawing done in room.ts, **entity placement not implemented**
+- Pits/Nests: loader complete, generators exist in room.ts, **not connected to generate.ts**
+- Town: generateTown() exists, **depth=0 routing not connected**
+- Retry: none (C version retries up to 100 times)
+- Level feeling: field exists, no calculation
 
-### 6.5 ショップ・町
+### 6.5 Shops & Town
 
-- store.ts コアロジック完成
-- ショップUI: 未実装
-- 町マップ → ゲーム起動: 未接続
+- store.ts core logic complete
+- Shop UI: not implemented
+- Town map → game startup: not connected
 
-### 6.6 モンスターAI・行動
+### 6.6 Monster AI & Behavior
 
-- **個別ヒートマップ**: C版は各モンスターに個別のflow/pathデータ（`monster->flow`）を持つが、TS版はChunk全体の音/匂いヒートマップのみ
-- **モンスターHP再生**: TS版は100ターンごとに1/8回復（簡易実装）。C版は毎ターン分数蓄積（プレイヤーと同様のfractional方式）
-- **モンスター変身（shape-shifting）**: Monster型に`shapes`/`numShapes`/`originalRace`フィールドは存在するが、変身ロジックは未実装
+- **Individual heatmaps**: C version has per-monster flow/path data (`monster->flow`), but TS version only has chunk-wide sound/scent heatmaps
+- **Monster HP regeneration**: TS version recovers 1/8 every 100 turns (simplified). C version uses per-turn fractional accumulation (same fractional method as player)
+- **Monster shape-shifting**: Monster type has `shapes`/`numShapes`/`originalRace` fields, but transformation logic is not implemented
 
 ### 6.7 save/load
 
-- race/class がプレースホルダー復元（ロード後に正しいデータが欠落）
-- パニックセーブ: beforeunload ハンドラ実装済み
-- キャラクターダンプ/ハイスコア: 未実装
+- race/class restored as placeholders (correct data missing after load)
+- Panic save: beforeunload handler implemented
+- Character dump/high scores: not implemented
 
 ### 6.8 UI
 
-- ターゲティングモード: 実装済み（カーソル移動式）
-- 投射ビジュアル: 未実装（イベントは emit されない）
-- マルチウィンドウ: 未実装
-- キーマップモード切替: 未実装
-- マウス/サウンド: 未実装
+- Targeting mode: implemented (cursor-based movement)
+- Projection visuals: not implemented (events are not emitted)
+- Multi-window: not implemented
+- Keymap mode switching: not implemented
+- Mouse/sound: not implemented
 
 ---
 
-## 7. 作業分担表（Work Packages）
+## 7. Work Packages
 
-各 WP は独立して着手可能（前提WPの完了を待つ必要がある場合は明記）。
-**推定規模**: S (< 100行), M (100-300行), L (300-800行), XL (800行+)
-
----
-
-### WP-A: モンスター呪文データ接続 [M]
-
-**担当範囲**: `data/monster-loader.ts`, `monster/move.ts`
-**前提**: なし
-
-| タスク | 詳細 |
-|--------|------|
-| A1 | `monster-loader.ts`: `spell-freq` フィールドをパースし `freqInnate`/`freqSpell` に設定 (`1_in_N` 形式) |
-| A2 | `monster-loader.ts`: `spells` 配列 → `spellFlags` BitFlag マッピング (SPELL_FLAG_MAP 定義) |
-| A3 | `monster-loader.ts`: `spellPower` = monster level として設定 |
-| A4 | `monster/move.ts`: monsterTakeTurn() で `freqInnate`/`freqSpell` 確率判定追加 |
-
-**検証**: モンスターが呪文を実際に使用する（ログにスペル名が表示される）
+Each WP can be started independently (prerequisites noted where applicable).
+**Estimated size**: S (< 100 lines), M (100-300 lines), L (300-800 lines), XL (800+ lines)
 
 ---
 
-### WP-B: エフェクトハンドラ完成 [XL]
+### WP-A: Monster Spell Data Connection [M]
 
-**担当範囲**: `effect/general.ts`, `effect/attack.ts`, 新規 `effect/monster.ts`
-**前提**: なし（独立作業可能）
+**Scope**: `data/monster-loader.ts`, `monster/move.ts`
+**Prerequisites**: None
 
-| タスク | 詳細 |
-|--------|------|
-| B1 | スタブ11件の実装完了 (TELEPORT地形チェック, IDENTIFY→knowledge接続, ENCHANT実装, RECHARGE実装, SUMMON→monster/make接続, BANISH→monster削除, GLYPH→地形変更, CONFUSE/SLEEP→monster timed, DRAIN_LIGHT→light減少) |
-| B2 | 未登録73件から**優先30件**を実装: TELEPORT_TO, TELEPORT_LEVEL, DETECT_STAIRS, DETECT_LIVING_MONSTERS, DETECT_INVISIBLE_MONSTERS, DETECT_EVIL, PROJECT_LOS, PROJECT_LOS_AWARE, ACQUIRE, RUBBLE, GRANITE, ARC, SHORT_BEAM, LASH, BOLT_OR_BEAM, LINE, TOUCH, BRAND_WEAPON, BRAND_AMMO, CREATE_ARROWS, DRAIN_LIFE(登録), TURN_UNDEAD, DEEP_DESCENT, SCRAMBLE/UNSCRAMBLE_STATS, ENCHANT_WEAPON, ENCHANT_ARMOR, REMOVE_CURSE(実装), RANDOM, TAP_DEVICE |
-| B3 | `monsterCastSpell()` の返却結果をゲームループで適用: 状態異常 → `incTimedEffect()`, 召喚 → `placeNewMonster()` |
+| Task | Details |
+|------|---------|
+| A1 | `monster-loader.ts`: Parse `spell-freq` field and set `freqInnate`/`freqSpell` (`1_in_N` format) |
+| A2 | `monster-loader.ts`: `spells` array → `spellFlags` BitFlag mapping (define SPELL_FLAG_MAP) |
+| A3 | `monster-loader.ts`: Set `spellPower` = monster level |
+| A4 | `monster/move.ts`: Add `freqInnate`/`freqSpell` probability check in monsterTakeTurn() |
 
-**検証**: ポーションを飲む / 杖を振る / 巻物を読む → 実際にゲーム状態が変化する
-
----
-
-### WP-C: ダンジョン生成強化 [L]
-
-**担当範囲**: `generate/generate.ts`, `generate/room.ts`
-**前提**: なし
-
-| タスク | 詳細 |
-|--------|------|
-| C1 | `generate.ts`: `dungeon-profile-loader` のプロファイルを接続。深度別の部屋数/モンスター密度/トンネル設定 |
-| C2 | `generate.ts`: 生成リトライ（最大100回、C版準拠） |
-| C3 | `room.ts`: `generateVaultRoom()` 第2パス実装（`9`→モンスター、`&`→アーティファクト、`*`→アイテム配置） |
-| C4 | `generate.ts`: `generatePitRoom()`/`generateNestRoom()` を部屋選択テーブルに追加 |
-| C5 | `generate.ts`: レベル感覚計算（`chunk.feeling` = obj_rating + mon_rating 合算） |
-
-**検証**: 深層でvault/pit部屋が出現する。レベル感覚メッセージが表示される
+**Verification**: Monsters actually cast spells (spell names appear in log)
 
 ---
 
-### WP-D: 町・ショップUI [L]
+### WP-B: Effect Handler Completion [XL]
 
-**担当範囲**: `generate/generate.ts`, `web/src/game-bridge.ts`, 新規 `web/src/store-screen.ts`
-**前提**: なし
+**Scope**: `effect/general.ts`, `effect/attack.ts`, new `effect/monster.ts`
+**Prerequisites**: None (independent work)
 
-| タスク | 詳細 |
-|--------|------|
-| D1 | `generate/generate.ts`: depth===0 で `generateTown()` を呼び出す分岐追加 |
-| D2 | `web/src/main.ts`: 新規ゲーム開始を depth=0 に変更 |
-| D3 | 新規 `web/src/store-screen.ts`: テキストベース売買画面（商品リスト、購入/売却、ESCで退出） |
-| D4 | `web/src/game-bridge.ts`: 店タイル上で Enter → ショップ画面起動 |
-| D5 | `player/birth.ts`: class.json の `start-items` → インベントリ初期装備追加 |
+| Task | Details |
+|------|---------|
+| B1 | Complete implementation of 11 stubs (TELEPORT terrain check, IDENTIFY → knowledge connection, ENCHANT implementation, RECHARGE implementation, SUMMON → monster/make connection, BANISH → monster deletion, GLYPH → terrain change, CONFUSE/SLEEP → monster timed, DRAIN_LIGHT → light reduction) |
+| B2 | Implement **priority 30** of the 73 unregistered: TELEPORT_TO, TELEPORT_LEVEL, DETECT_STAIRS, DETECT_LIVING_MONSTERS, DETECT_INVISIBLE_MONSTERS, DETECT_EVIL, PROJECT_LOS, PROJECT_LOS_AWARE, ACQUIRE, RUBBLE, GRANITE, ARC, SHORT_BEAM, LASH, BOLT_OR_BEAM, LINE, TOUCH, BRAND_WEAPON, BRAND_AMMO, CREATE_ARROWS, DRAIN_LIFE (register), TURN_UNDEAD, DEEP_DESCENT, SCRAMBLE/UNSCRAMBLE_STATS, ENCHANT_WEAPON, ENCHANT_ARMOR, REMOVE_CURSE (implement), RANDOM, TAP_DEVICE |
+| B3 | Apply `monsterCastSpell()` return results in the game loop: status effects → `incTimedEffect()`, summoning → `placeNewMonster()` |
 
-**検証**: ゲーム開始→町画面→店に入る→アイテム購入→ダンジョンへ降りる
+**Verification**: Drinking potions / zapping wands / reading scrolls → game state actually changes
 
 ---
 
-### WP-E: 投射ビジュアル・エフェクト [M]
+### WP-C: Dungeon Generation Enhancement [L]
 
-**担当範囲**: `project/project.ts`, `web/src/game-bridge.ts`
-**前提**: なし
+**Scope**: `generate/generate.ts`, `generate/room.ts`
+**Prerequisites**: None
 
-| タスク | 詳細 |
-|--------|------|
-| E1 | `project/project.ts`: BOLT/BALL/BEAM/BREATH 投射時に EventBus でセル毎イベント emit |
-| E2 | `web/src/game-bridge.ts`: イベント受信→Canvas上でフラッシュアニメーション（`*` 文字を色付きで短時間表示） |
-| E3 | ball/breath の範囲を同時にハイライト表示 |
+| Task | Details |
+|------|---------|
+| C1 | `generate.ts`: Connect `dungeon-profile-loader` profiles. Depth-based room count/monster density/tunnel settings |
+| C2 | `generate.ts`: Generation retry (up to 100 attempts, matching C version) |
+| C3 | `room.ts`: `generateVaultRoom()` second pass implementation (`9` → monster, `&` → artifact, `*` → item placement) |
+| C4 | `generate.ts`: Add `generatePitRoom()`/`generateNestRoom()` to room selection table |
+| C5 | `generate.ts`: Level feeling calculation (`chunk.feeling` = obj_rating + mon_rating combined) |
 
-**検証**: 魔法/射撃が視覚的にパス上を飛んでいくのが見える
-
----
-
-### WP-F: モンスター blow エフェクト完成 [S]
-
-**担当範囲**: `monster/attack.ts`
-**前提**: なし
-
-| タスク | 詳細 |
-|--------|------|
-| F1 | DRAIN_CHARGES: 杖/ワンドからチャージ吸収（インベントリ検索→charges減少） |
-| F2 | EAT_GOLD: ゴールド減少 + "Your purse feels lighter!" |
-| F3 | EAT_ITEM: インベントリからランダムにアイテム1つ消費 |
-| F4 | EAT_FOOD: 食料アイテム消費 |
-| F5 | EAT_LIGHT: 光源の燃料/チャージ減少 |
-| F6 | SHATTER: 周囲地形破壊（GRANITE→FLOOR） |
-
-**検証**: 各 blow method のモンスターに殴られて対応する効果が発生する
+**Verification**: Vaults/pit rooms appear on deeper levels. Level feeling messages are displayed
 
 ---
 
-### WP-G: FOV・視覚強化 [M]
+### WP-D: Town & Shop UI [L]
 
-**担当範囲**: `cave/view.ts`, `monster/move.ts`, `web/src/game-bridge.ts`
-**前提**: なし
+**Scope**: `generate/generate.ts`, `web/src/game-bridge.ts`, new `web/src/store-screen.ts`
+**Prerequisites**: None
 
-| タスク | 詳細 |
-|--------|------|
-| G1 | `cave/view.ts`: BLIND状態→全グリッド非表示（remembered地形のみ） |
-| G2 | `cave/view.ts`: 赤外線視覚→暗闇でも温血モンスター可視 |
-| G3 | `game-bridge.ts`: BLIND表示モード（全マス暗転、既知地形のみ薄く表示） |
+| Task | Details |
+|------|---------|
+| D1 | `generate/generate.ts`: Add branch to call `generateTown()` when depth===0 |
+| D2 | `web/src/main.ts`: Change new game start to depth=0 |
+| D3 | New `web/src/store-screen.ts`: Text-based buy/sell screen (item list, purchase/sell, ESC to exit) |
+| D4 | `web/src/game-bridge.ts`: Enter on shop tile → launch shop screen |
+| D5 | `player/birth.ts`: class.json `start-items` → add starting equipment to inventory |
 
-**検証**: 盲目ポーション→画面が暗転→赤外線で近くのモンスターだけ見える
-
----
-
-### WP-H: save/load 完全化 [M]
-
-**担当範囲**: `save/load.ts`, `web/src/main.ts`
-**前提**: なし
-
-| タスク | 詳細 |
-|--------|------|
-| H1 | `load.ts`: ロード時に `monsterRaces` / `objectKinds` から正しい race/class を lookup（プレースホルダー廃止） |
-| H2 | `load.ts`: セーブデータバージョン移行フレームワーク（古いバージョン→新フォーマット変換） |
-| H3 | `save.ts`: オブジェクトのシリアライズ完成（kindIdx, egoIdx, art_idx 保存） |
-| H4 | キャラクターダンプ（テキスト出力: ステータス/装備/キル数/深度） |
-
-**検証**: セーブ→ブラウザ再起動→ロード→装備/インベントリが完全復元
+**Verification**: Start game → town screen → enter shop → purchase item → descend into dungeon
 
 ---
 
-### WP-I: プレイヤー計算修正 [S]
+### WP-E: Projection Visuals & Effects [M]
 
-**担当範囲**: `player/calcs.ts`, `player/birth.ts`
-**前提**: なし
+**Scope**: `project/project.ts`, `web/src/game-bridge.ts`
+**Prerequisites**: None
 
-| タスク | 詳細 |
-|--------|------|
-| I1 | `calcs.ts`: `calcBlows()` を装備武器の重量/クラスに基づく正しい計算に修正（現在は固定100） |
-| I2 | `birth.ts`: `createDefaultBody()` で装備スロットを正しく初期化（現在は空配列） |
-| I3 | `calcs.ts`: `calcBonuses()` をゲームループの cleanup で毎ターン呼び出し |
+| Task | Details |
+|------|---------|
+| E1 | `project/project.ts`: Emit per-cell EventBus events during BOLT/BALL/BEAM/BREATH projection |
+| E2 | `web/src/game-bridge.ts`: Receive events → flash animation on Canvas (display colored `*` character briefly) |
+| E3 | Simultaneously highlight ball/breath area of effect |
 
-**検証**: 重い武器 → blows減少、軽い武器 → blows増加
-
----
-
-### WP-J: 未実装ゲームループ処理 [M]
-
-**担当範囲**: `game/world.ts`
-**前提**: WP-A（モンスター呪文データ）推奨
-
-| タスク | 詳細 |
-|--------|------|
-| J1 | モンスター自然生成: depth×2+10 ターンごとにランダム1体配置 |
-| J2 | オブジェクトタイムアウト: 杖チャージ回復、松明燃料消費 |
-| J3 | `process_player_cleanup()`: 毎ターン `calcBonuses()` 再計算 |
-| J4 | `reset_monsters()`: MFLAG_HANDLED クリア |
-| J5 | モンスター HP 再生周期修正（REGENERATE フラグ持ちは50ターン周期） |
-
-**検証**: 長時間同じ階に滞在→新モンスターが出現する
+**Verification**: Spells/ranged attacks visually travel along their path
 
 ---
 
-### WP-K: コマンドリピート＆キーマップ [S]
+### WP-F: Monster Blow Effect Completion [S]
 
-**担当範囲**: `game/world.ts`, `web/src/game-bridge.ts`, `web/src/keyboard-input.ts`
-**前提**: なし
+**Scope**: `monster/attack.ts`
+**Prerequisites**: None
 
-| タスク | 詳細 |
-|--------|------|
-| K1 | 数字プレフィックス入力 (例: `5s` = search 5回) |
-| K2 | リピート中断条件（モンスター発見、ダメージ受信、新メッセージ） |
-| K3 | Roguelike キーマップモード（hjkl移動、yubn斜め移動の別解釈） |
+| Task | Details |
+|------|---------|
+| F1 | DRAIN_CHARGES: Drain charges from wands/staves (inventory search → decrease charges) |
+| F2 | EAT_GOLD: Decrease gold + "Your purse feels lighter!" |
+| F3 | EAT_ITEM: Consume 1 random item from inventory |
+| F4 | EAT_FOOD: Consume food item |
+| F5 | EAT_LIGHT: Decrease light source fuel/charges |
+| F6 | SHATTER: Destroy surrounding terrain (GRANITE → FLOOR) |
 
-**検証**: `99s` 入力→99回検索が自動実行→モンスター発見で中断
+**Verification**: Getting hit by monsters with each blow method triggers the corresponding effect
 
 ---
 
-## 8. 依存関係・着手順序
+### WP-G: FOV & Vision Enhancement [M]
+
+**Scope**: `cave/view.ts`, `monster/move.ts`, `web/src/game-bridge.ts`
+**Prerequisites**: None
+
+| Task | Details |
+|------|---------|
+| G1 | `cave/view.ts`: BLIND state → hide all grid cells (remembered terrain only) |
+| G2 | `cave/view.ts`: Infravision → warm-blooded monsters visible in darkness |
+| G3 | `game-bridge.ts`: BLIND display mode (darken all cells, show known terrain faintly) |
+
+**Verification**: Drink blindness potion → screen goes dark → infravision shows only nearby monsters
+
+---
+
+### WP-H: Save/Load Completion [M]
+
+**Scope**: `save/load.ts`, `web/src/main.ts`
+**Prerequisites**: None
+
+| Task | Details |
+|------|---------|
+| H1 | `load.ts`: Look up correct race/class from `monsterRaces` / `objectKinds` on load (eliminate placeholders) |
+| H2 | `load.ts`: Save data version migration framework (old version → new format conversion) |
+| H3 | `save.ts`: Complete object serialization (save kindIdx, egoIdx, art_idx) |
+| H4 | Character dump (text output: stats/equipment/kill count/depth) |
+
+**Verification**: Save → restart browser → load → equipment/inventory fully restored
+
+---
+
+### WP-I: Player Calculation Fixes [S]
+
+**Scope**: `player/calcs.ts`, `player/birth.ts`
+**Prerequisites**: None
+
+| Task | Details |
+|------|---------|
+| I1 | `calcs.ts`: Fix `calcBlows()` to use correct calculation based on equipped weapon weight/class (currently fixed at 100) |
+| I2 | `birth.ts`: Properly initialize equipment slots in `createDefaultBody()` (currently empty array) |
+| I3 | `calcs.ts`: Call `calcBonuses()` every turn in the game loop cleanup |
+
+**Verification**: Heavy weapon → fewer blows, light weapon → more blows
+
+---
+
+### WP-J: Unimplemented Game Loop Processing [M]
+
+**Scope**: `game/world.ts`
+**Prerequisites**: WP-A (monster spell data) recommended
+
+| Task | Details |
+|------|---------|
+| J1 | Natural monster spawning: place 1 random monster every depth×2+10 turns |
+| J2 | Object timeout: wand charge recovery, torch fuel consumption |
+| J3 | `process_player_cleanup()`: Recalculate `calcBonuses()` every turn |
+| J4 | `reset_monsters()`: Clear MFLAG_HANDLED |
+| J5 | Fix monster HP regeneration cycle (monsters with REGENERATE flag use 50-turn cycle) |
+
+**Verification**: Stay on the same level for a long time → new monsters appear
+
+---
+
+### WP-K: Command Repeat & Keymaps [S]
+
+**Scope**: `game/world.ts`, `web/src/game-bridge.ts`, `web/src/keyboard-input.ts`
+**Prerequisites**: None
+
+| Task | Details |
+|------|---------|
+| K1 | Numeric prefix input (e.g., `5s` = search 5 times) |
+| K2 | Repeat interruption conditions (monster detected, damage received, new message) |
+| K3 | Roguelike keymap mode (hjkl movement, yubn diagonal movement alternate interpretation) |
+
+**Verification**: Enter `99s` → 99 searches auto-execute → interrupted on monster detection
+
+---
+
+## 8. Dependencies & Suggested Order
 
 ```
-独立（即座に着手可能）:
-  WP-A (モンスター呪文データ)
-  WP-B (エフェクトハンドラ)
-  WP-C (ダンジョン生成)
-  WP-D (町・ショップ)
-  WP-E (投射ビジュアル)
-  WP-F (blow エフェクト)
-  WP-G (FOV強化)
-  WP-H (save/load)
-  WP-I (プレイヤー計算)
-  WP-K (リピート・キーマップ)
+Independent (can start immediately):
+  WP-A (Monster spell data)
+  WP-B (Effect handlers)
+  WP-C (Dungeon generation)
+  WP-D (Town & shops)
+  WP-E (Projection visuals)
+  WP-F (Blow effects)
+  WP-G (FOV enhancement)
+  WP-H (Save/load)
+  WP-I (Player calculations)
+  WP-K (Repeat & keymaps)
 
-依存あり:
-  WP-J (ゲームループ) ← WP-A 推奨（呪文データがないとJ1が不完全）
+Has dependencies:
+  WP-J (Game loop) ← WP-A recommended (spell data needed for J1 to be complete)
 
-推奨着手順:
-  1st wave: WP-A, WP-C, WP-D, WP-F, WP-I （基盤修正）
-  2nd wave: WP-B, WP-G, WP-H, WP-J      （システム完成）
-  3rd wave: WP-E, WP-K                    （ポリッシュ）
+Suggested order:
+  1st wave: WP-A, WP-C, WP-D, WP-F, WP-I  (foundation fixes)
+  2nd wave: WP-B, WP-G, WP-H, WP-J         (system completion)
+  3rd wave: WP-E, WP-K                       (polish)
 ```
 
-### 4名分担例
+### 4-Agent Distribution Example
 
-| 担当 | WP | 推定作業量 |
-|------|-----|-----------|
-| Agent 1 | WP-B (エフェクト XL) + WP-F (blow S) | 大 |
-| Agent 2 | WP-C (生成 L) + WP-D (町 L) | 大 |
-| Agent 3 | WP-A (呪文データ M) + WP-J (ループ M) + WP-I (計算 S) | 中 |
-| Agent 4 | WP-G (FOV M) + WP-H (save M) + WP-E (ビジュアル M) | 中 |
+| Agent | WP | Estimated Workload |
+|-------|-----|-------------------|
+| Agent 1 | WP-B (Effects XL) + WP-F (Blow S) | Heavy |
+| Agent 2 | WP-C (Generation L) + WP-D (Town L) | Heavy |
+| Agent 3 | WP-A (Spell data M) + WP-J (Loop M) + WP-I (Calculations S) | Medium |
+| Agent 4 | WP-G (FOV M) + WP-H (Save M) + WP-E (Visuals M) | Medium |
 
-残り WP-K (S) は最初に終わった担当が拾う。
+Remaining WP-K (S) is picked up by whichever agent finishes first.
 
-### 2名分担例
+### 2-Agent Distribution Example
 
-| 担当 | WP |
-|------|-----|
-| Agent 1 (コア) | WP-A + WP-B + WP-F + WP-I + WP-J |
-| Agent 2 (UI/生成) | WP-C + WP-D + WP-E + WP-G + WP-H + WP-K |
-
----
-
-## 9. 意図的に延期する項目
-
-| 項目 | 理由 |
-|------|------|
-| ランダムアーティファクト (`obj-randart.c`) | 極めて複雑な生成アルゴリズム |
-| アイテム無視/スケルチ (`obj-ignore.c`) | QoL機能、コア不要 |
-| マルチウィンドウUI | UIアーキテクチャ根本変更 |
-| マウス/サウンド | 低優先度 |
-| 永続レベル | レベルキャッシュシステム必要 |
-| グループAI | 複雑な協調行動 |
-| ハイスコアテーブル | cosmetic |
-| ウィザードモード | デバッグ用 |
-| SMART AI (`known_pstate`) | 高度AI、低優先度 |
-| `project_obj` (投射→オブジェクト破壊) | ニッチ機能 |
-| モンスター変身 (`mon-shape.c`) | 型フィールド存在するがロジック複雑 |
-| 個別モンスターヒートマップ (`monster->flow`) | 現行BFS音/匂いで十分機能 |
+| Agent | WP |
+|-------|-----|
+| Agent 1 (Core) | WP-A + WP-B + WP-F + WP-I + WP-J |
+| Agent 2 (UI/Generation) | WP-C + WP-D + WP-E + WP-G + WP-H + WP-K |
 
 ---
 
-## 10. テスト方針
+## 9. Intentionally Deferred Items
 
-| レベル | 対象 | 現状 |
-|--------|------|------|
-| ユニットテスト | 各モジュール関数 | 1,443テスト / 58ファイル（全パス） |
-| 統合テスト | コマンド→状態変化 | combat.test.ts, world.test.ts で部分カバー |
-| E2Eテスト | ブラウザ操作→ゲーム進行 | **未実装** |
-
-各WP完了時の検証:
-1. `npm run build` — 型エラー 0
-2. `npm test` — 全テスト パス（新テスト追加推奨）
-3. ブラウザ手動確認 — 該当機能の動作確認
+| Item | Reason |
+|------|--------|
+| Random artifacts (`obj-randart.c`) | Extremely complex generation algorithm |
+| Item ignoring/squelching (`obj-ignore.c`) | QoL feature, not core |
+| Multi-window UI | Requires fundamental UI architecture change |
+| Mouse/sound | Low priority |
+| Persistent levels | Requires level cache system |
+| Group AI | Complex coordinated behavior |
+| High score table | Cosmetic |
+| Wizard mode | Debug only |
+| SMART AI (`known_pstate`) | Advanced AI, low priority |
+| `project_obj` (projection → object destruction) | Niche feature |
+| Monster shape-shifting (`mon-shape.c`) | Type fields exist but logic is complex |
+| Per-monster heatmaps (`monster->flow`) | Current BFS sound/scent works sufficiently |
 
 ---
 
-## 11. 設計原則
+## 10. Testing Strategy
 
-1. **純粋関数優先**: コマンドは `CommandResult` を返す。副作用は呼び出し側で適用
-2. **型安全**: branded type ID（`MonsterId`, `ObjectKindId`等）で型混同を防止
-3. **イベント駆動UI**: core → EventBus → web。core は DOM を知らない
-4. **データ駆動**: ゲームデータは JSON、ロジックは TypeScript。新モンスター追加 = JSON 編集のみ
-5. **C版忠実移植**: 関数名・変数名は C版に準拠（`cmdWalk` ← `do_cmd_walk`、`resolveBlowEffect` ← `monster_blow_effect`）
-6. **テスト必須**: 新機能には必ずテスト追加。SKIP = FAIL
+| Level | Target | Current State |
+|-------|--------|---------------|
+| Unit tests | Individual module functions | 1,443 tests / 58 files (all passing) |
+| Integration tests | Command → state change | Partially covered in combat.test.ts, world.test.ts |
+| E2E tests | Browser interaction → game progression | **Not implemented** |
+
+Verification for each WP completion:
+1. `npm run build` — 0 type errors
+2. `npm test` — all tests pass (adding new tests recommended)
+3. Manual browser check — verify the relevant feature works
+
+---
+
+## 11. Design Principles
+
+1. **Pure functions first**: Commands return `CommandResult`. Side effects are applied by the caller
+2. **Type safety**: Branded type IDs (`MonsterId`, `ObjectKindId`, etc.) prevent type confusion
+3. **Event-driven UI**: core → EventBus → web. Core has no knowledge of DOM
+4. **Data-driven**: Game data is JSON, logic is TypeScript. Adding a new monster = JSON edit only
+5. **Faithful C version port**: Function/variable names follow C version conventions (`cmdWalk` ← `do_cmd_walk`, `resolveBlowEffect` ← `monster_blow_effect`)
+6. **Tests required**: New features must include tests. SKIP = FAIL
