@@ -1,64 +1,97 @@
 # Angband-TS
 
-C版 [Angband 4.2.6](https://angband.github.io/angband/) の TypeScript 移植。
-ブラウザ上でプレイ可能。
+A full TypeScript port of [Angband 4.2.6](https://angband.github.io/angband/), the classic roguelike dungeon crawler. Playable in the browser.
 
-## セットアップ
+## Quick Start
 
 ```bash
 npm install
 npm run build
+npm run dev        # opens Vite dev server → play in browser
 ```
 
-## 開発
-
-```bash
-npm run dev          # Vite dev server (ブラウザでプレイ)
-npm run typecheck    # TypeScript 型チェック
-npm run test         # Vitest テスト実行
-```
-
-## プロジェクト構成
+## Project Structure
 
 ```
 packages/
-  @angband/core/     ゲームロジック（プレイヤー、モンスター、ダンジョン生成等）
-  @angband/web/      ブラウザUI（Canvas描画、キーボード入力）
+  @angband/core/       Game engine (player, monsters, dungeon generation, combat, items)
+  @angband/web/        Browser UI (Canvas rendering, keyboard input)
+  @angband/renderer/   Rendering abstraction layer
+tools/
+  busho-player.ts      AI player agent — plays Angband autonomously via ai-server
+  replay-viewer.html   Replay viewer for recorded game sessions
+  run-alternating.sh   Batch runner for multiple AI sessions
+  data-converter/      Data conversion utilities (C → TS)
+  snapshot-tester/     Snapshot-based regression tests
+  logs/                AI game session logs
 ```
 
-## Borg リモートサーバー
-
-C版 Borg（自動プレイAI）が TCP 経由で TS 版 Angband をプレイするためのサーバーを
-提供する。C版 Borg の AI ロジックがそのまま TS エンジン上で動作するため、
-両実装のクロステストに利用できる。
-
-### 起動方法
+## Development
 
 ```bash
-# Terminal 1: TS リモートサーバー起動
+npm run dev          # Vite dev server (play in browser)
+npm run build        # Production build
+npm run typecheck    # TypeScript type checking
+npm run test         # Vitest test suite
+npm run lint         # ESLint
+```
+
+## AI Server
+
+An HTTP server that runs a headless Angband game and exposes it as a structured JSON API. No screen parsing — the AI agent sends `GameCommand`s and receives full game state directly.
+
+### Usage
+
+```bash
+# Start the AI server
+npx tsx packages/@angband/core/src/borg/ai-server.ts --port 3000
+
+# In another terminal, run the AI player
+npx tsx tools/busho-player.ts --port 3000
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/state` | GET | Current game state (player, map, monsters, inventory) |
+| `/command` | POST | Send a GameCommand, returns result + updated state |
+| `/health` | GET | Server health check |
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | 3000 | HTTP listen port |
+| `--race` | Human | Player race |
+| `--class` | Warrior | Player class |
+| `--seed` | (clock) | RNG seed for reproducible runs |
+
+## Borg Remote Server
+
+A TCP server for the C Borg (the original auto-play AI) to play against the TS engine. Useful for cross-implementation testing between the C and TS versions.
+
+```bash
+# Terminal 1: start TS remote server
 npx tsx packages/@angband/core/src/borg/remote-server.ts --port 9876
 
-# Terminal 2: C版 Borg を接続
+# Terminal 2: connect C Borg
 cd ../angband
 angband -mborg -n -- --remote localhost:9876
 ```
 
-### オプション
+### Protocol
 
-| フラグ | デフォルト | 説明 |
-|--------|-----------|------|
-| `--port` | 9876 | TCP 待ち受けポート |
-| `--race` | Human | プレイヤー種族 |
-| `--class` | Warrior | プレイヤー職業 |
-| `--seed` | (時刻) | 乱数シード（再現テスト用） |
+The server sends screen frames as `FRAME/ROW/CURSOR/STAT/INVEN/END` messages. The client responds with `KEY <code> <mods>` messages which are translated into game commands.
 
-### プロトコル概要
+## Documentation
 
-サーバーはゲーム画面を `FRAME/ROW/CURSOR/STAT/INVEN/END` 形式でクライアントに送信し、
-クライアントからの `KEY <code> <mods>` メッセージをゲームコマンドに変換する。
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture overview
+- [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) — V2 architecture design
+- [GAME_FLOW.md](GAME_FLOW.md) — Game loop and flow
+- [PLAN.md](PLAN.md) — Porting plan and progress
+- [PORTING_DIFF.md](PORTING_DIFF.md) — Differences from the C version
 
-## ドキュメント
+## License
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — アーキテクチャ図
-- [PLAN.md](PLAN.md) — 移植計画と進捗
-- [PORTING_DIFF.md](PORTING_DIFF.md) — C版との差分
+Based on [Angband](https://github.com/angband/angband), licensed under GPL-2.0.
