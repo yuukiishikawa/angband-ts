@@ -1,8 +1,132 @@
-# Angband-TS Architecture Diagrams
+# Angband-TS Architecture
 
-## 1. Class Diagrams (Types & Interface Relationships)
+A TypeScript port of [Angband 4.2.6](https://angband.github.io/angband/). 28,583 source lines, 1,441 tests passing, playable in the browser.
 
-### 1-1. Core Entity Relationship Diagram
+---
+
+## 1. Package Structure
+
+```mermaid
+graph TB
+    subgraph "@angband/web"
+        main["main.ts — Entry point"]
+        bridge["game-bridge.ts — UI ↔ Core bridge"]
+        kbinput["keyboard-input.ts — Keyboard input"]
+        birth["birth-screen.ts — Character creation"]
+        maprender["map-renderer.ts — Dungeon display"]
+        storeui["store-screen.ts — Shop UI"]
+        invui["inventory-ui.ts — Inventory UI"]
+        spellui["spell-ui.ts — Spell selection UI"]
+    end
+
+    subgraph "@angband/renderer"
+        term["terminal.ts — Virtual 80×24 grid"]
+        display["display.ts — Display abstraction"]
+        textblock["textblock.ts — Text block rendering"]
+    end
+
+    subgraph "@angband/core"
+        subgraph "game/"
+            state["state.ts — GameState"]
+            world["world.ts — Game loop"]
+            event["event.ts — EventBus"]
+            input["input.ts — Input abstraction"]
+            bootstrap["bootstrap.ts — Initialization"]
+        end
+        subgraph "command/"
+            cmd_core["core.ts — Command dispatcher"]
+            movement["movement.ts — Walk, run, stairs"]
+            combat["combat.ts — Melee & ranged"]
+            item_cmd["item.ts — Item use"]
+            magic_cmd["magic.ts — Spellcasting"]
+        end
+        subgraph "monster/"
+            mon_move["move.ts — AI & pathfinding"]
+            mon_attack["attack.ts — Melee resolution"]
+            mon_make["make.ts — Spawn & placement"]
+            mon_spell["spell.ts — Monster spellcasting"]
+        end
+        subgraph "generate/"
+            gen["generate.ts — Dungeon generation"]
+            rooms["room.ts — Room carving"]
+            populate["populate.ts — Monster & item placement"]
+        end
+        subgraph "cave/"
+            chunk["chunk.ts — Chunk management"]
+            square["square.ts — Square queries"]
+            viewfov["view.ts — FOV (shadowcasting)"]
+            pathfind["pathfind.ts — A* pathfinding"]
+        end
+        subgraph "object/"
+            gear["gear.ts — Equipment"]
+            pile["pile.ts — Item stacks"]
+            slays["slays.ts — Slay & brand damage"]
+        end
+        subgraph "player/"
+            pbirth["birth.ts — Character creation"]
+            calcs["calcs.ts — Stat calculations"]
+            spell["spell.ts — Spell management"]
+        end
+        subgraph "borg/"
+            aiserver["ai-server.ts — HTTP API for AI"]
+            remserver["remote-server.ts — TCP for C Borg"]
+        end
+        subgraph "z/"
+            rng["rand.ts — RNG (WELL1024a)"]
+            bitflag["bitflag.ts — BitFlag class"]
+        end
+    end
+
+    subgraph "tools/"
+        aiplayer["busho-player.ts — AI agent"]
+        converter["data-converter/ — txt→json"]
+    end
+
+    main --> bridge
+    main --> birth
+    main --> bootstrap
+
+    bridge --> world
+    bridge --> kbinput
+    bridge --> term
+    bridge --> display
+
+    world --> cmd_core
+    world --> mon_move
+    world --> mon_attack
+    world --> viewfov
+    world --> gen
+    world --> event
+
+    cmd_core --> movement
+    cmd_core --> combat
+    cmd_core --> item_cmd
+    cmd_core --> magic_cmd
+
+    gen --> chunk
+    gen --> populate
+    populate --> mon_make
+
+    aiserver --> world
+    aiserver --> state
+    aiplayer -.->|HTTP| aiserver
+    remserver --> world
+
+    style main fill:#4a9,stroke:#333,color:#fff
+    style bridge fill:#4a9,stroke:#333,color:#fff
+    style world fill:#e84,stroke:#333,color:#fff
+    style state fill:#e84,stroke:#333,color:#fff
+    style gen fill:#48e,stroke:#333,color:#fff
+    style mon_attack fill:#e44,stroke:#333,color:#fff
+    style aiserver fill:#a4e,stroke:#333,color:#fff
+    style aiplayer fill:#a4e,stroke:#333,color:#fff
+```
+
+---
+
+## 2. Core Entities
+
+### 2-1. GameState & Player
 
 ```mermaid
 classDiagram
@@ -13,108 +137,54 @@ classDiagram
         +Chunk chunk
         +Monster[] monsters
         +MonsterRace[] monsterRaces
+        +ObjectKind[] objectKinds
+        +Artifact[] artifacts
+        +EgoItem[] egoItems
+        +Store[] stores
         +GameMessage[] messages
         +EventBus eventBus
         +RNG rng
         +number depth
         +number turn
-        +boolean running
-        +boolean dead
-        +boolean won
+        +boolean running / dead / won
     }
 
     class Player {
         +PlayerRace race
         +PlayerClass class
         +PlayerBody body
-        +PlayerShape shape?
         +PlayerState state
         +PlayerUpkeep upkeep
         +Loc grid
-        +number chp / mhp
-        +number csp / msp
-        +number energy
-        +number lev / exp
-        +number au
-        +number food
+        +number chp / mhp / csp / msp
+        +number energy / lev / exp / au / food
         +number[] timed
         +number[] statMax / statCur
-        +boolean isDead
-        +boolean totalWinner
-        +string fullName
-        +string diedFrom
-    }
-
-    class PlayerRace {
-        +string name
-        +number ridx
-        +number hitDice
-        +number expFactor
-        +number[] statAdj
-        +number[] skills
-        +BitFlag flags
-        +ElementInfo[] elInfo
-    }
-
-    class PlayerClass {
-        +string name
-        +number cidx
-        +number hitDice
-        +number expFactor
-        +number[] statAdj
-        +ClassMagic magic
-        +StartItem[] startItems
-        +number maxAttacks
+        +boolean isDead / totalWinner
     }
 
     class PlayerState {
-        +number speed
-        +number ac / toA / toH / toD
-        +number numBlows
-        +number curLight
-        +number[] statInd / statUse
+        +number speed / ac / toA / toH / toD
+        +number numBlows / curLight
         +number[] skills
         +BitFlag flags
     }
 
     class PlayerUpkeep {
-        +boolean playing
-        +boolean generateLevel
-        +number energyUse
-        +number newSpells
-        +number resting / running
-    }
-
-    class ClassMagic {
-        +number spellFirst
-        +number totalSpells
-        +ClassBook[] books
-    }
-
-    class ClassSpell {
-        +string name
-        +number sidx
-        +number slevel
-        +number smana
-        +number sfail
+        +boolean playing / generateLevel
+        +number energyUse / newSpells
     }
 
     GameState --> Player
     GameState --> Chunk
     GameState --> EventBus
     GameState --> RNG
-    GameState "1" --> "*" Monster : monsters
-    GameState "1" --> "*" MonsterRace : monsterRaces
-    Player --> PlayerRace
-    Player --> PlayerClass
+    GameState "1" --> "*" Monster
     Player --> PlayerState
     Player --> PlayerUpkeep
-    Player --> PlayerBody
-    PlayerClass --> ClassMagic
-    ClassMagic "1" --> "*" ClassSpell : books.spells
 ```
 
-### 1-2. Monster Type Relationship Diagram
+### 2-2. Monster
 
 ```mermaid
 classDiagram
@@ -122,13 +192,9 @@ classDiagram
 
     class Monster {
         +MonsterRace race
-        +MonsterRace originalRace?
         +MonsterId midx
         +Loc grid
-        +number hp / maxhp
-        +number mspeed
-        +number energy
-        +number cdis
+        +number hp / maxhp / mspeed / energy / cdis
         +Int16Array mTimed
         +BitFlag mflag
         +MonsterTarget target
@@ -138,25 +204,11 @@ classDiagram
         +MonsterRaceId ridx
         +string name
         +MonsterBase base
-        +number avgHp / ac
-        +number speed / level
-        +number rarity
+        +number avgHp / ac / speed / level
         +number freqInnate / freqSpell
         +MonsterBlow[] blows
-        +BitFlag flags
-        +BitFlag spellFlags
-        +number dAttr / dChar
-        +number maxNum
-        +number curNum
-        +MonsterDrop[] drops
-        +MonsterFriend[] friends
-    }
-
-    class MonsterBase {
-        +string name
-        +string text
-        +BitFlag flags
-        +number dChar
+        +BitFlag flags / spellFlags
+        +number maxNum / curNum
     }
 
     class MonsterBlow {
@@ -165,43 +217,24 @@ classDiagram
         +RandomValue dice
     }
 
-    class MonsterDrop {
-        +number kindIdx
-        +number tval
-        +number percentChance
-        +number min / max
-    }
-
-    class MonsterTarget {
-        +Loc grid
-        +MonsterId midx
-    }
-
-    Monster --> MonsterRace : race
-    Monster --> MonsterTarget
-    MonsterRace --> MonsterBase : base
-    MonsterRace "1" --> "0..4" MonsterBlow : blows
-    MonsterRace "1" --> "*" MonsterDrop : drops
+    Monster --> MonsterRace
+    MonsterRace --> MonsterBase
+    MonsterRace "1" --> "0..4" MonsterBlow
 ```
 
-### 1-3. Dungeon (Chunk/Square) Type Relationship Diagram
+### 2-3. Dungeon
 
 ```mermaid
 classDiagram
     direction TB
 
     class Chunk {
-        +string name
-        +number depth
-        +number height / width
+        +number depth / height / width
         +Square[][] squares
         +Monster[] monsters
         +Heatmap noise / scent
-        +number monMax / monCnt
-        +number objMax
+        +number monMax / monCnt / objMax
         +number feeling
-        +number objRating / monRating
-        +Int32Array featCount
     }
 
     class Square {
@@ -213,115 +246,63 @@ classDiagram
         +TrapId trap?
     }
 
-    class Heatmap {
-        +Uint16Array[] grids
-    }
-
     class Feat {
         <<enumeration>>
-        NONE
-        FLOOR
-        CLOSED / OPEN / BROKEN
+        FLOOR / CLOSED / OPEN / BROKEN
         LESS / MORE
-        GRANITE / PERM
-        RUBBLE / MAGMA / QUARTZ
-        LAVA
-        SECRET
+        GRANITE / PERM / RUBBLE
+        SECRET / LAVA
         STORE_GENERAL..HOME
     }
 
-    class SquareFlag {
-        <<enumeration>>
-        MARK
-        GLOW
-        VAULT / ROOM
-        SEEN / VIEW / WASSEEN
-        TRAP / INVIS
-        WALL_INNER / WALL_OUTER
-        PROJECT
-        CLOSE_PLAYER
-    }
-
-    Chunk "1" --> "*" Square : squares[y][x]
-    Chunk --> Heatmap : noise, scent
-    Chunk "1" --> "*" Monster : monsters
-    Square ..> Feat : feat
-    Square ..> SquareFlag : info flags
+    Chunk "1" --> "*" Square
+    Square ..> Feat
 ```
 
-### 1-4. Web UI Layer Class Diagram
+---
+
+## 3. Game Loop
 
 ```mermaid
-classDiagram
-    direction TB
+sequenceDiagram
+    participant GL as Game Loop
+    participant FOV as FOV Update
+    participant PP as Player Phase
+    participant EC as Execute Command
+    participant PM as Monster Phase
+    participant PW as World Phase
 
-    class GameBridge {
-        -CanvasRenderer renderer
-        -Terminal terminal
-        -KeyboardInputProvider input
-        -GameState state
-        -number cameraX / cameraY
-        -string pendingDirectionCmd?
-        +start() Promise~void~
-        +getCommand() Promise~GameCommand~
-        -drawAll()
-        -drawMap()
-        -drawStatus()
-        -drawMessages()
-        -updateCamera()
-        -showTombstone()
-        -showVictoryScreen()
-        -showInventoryScreen()
-        -selectInventoryItem() Promise~number~
-        -selectSpell() Promise~number~
-        -saveToLocalStorage()
-        +hasSavedGame()$ boolean
-        +clearSave()$
-    }
+    GL->>FOV: updateView(chunk, player.grid)
 
-    class Terminal {
-        +number cols / rows
-        -TerminalCell[][] cells
-        +putChar(x, y, ch, fg, bg)
-        +putString(x, y, text, fg, bg)
-        +clear()
-        +clearDirty()
-    }
+    alt player.energy >= 100
+        GL->>PP: processPlayer()
+        PP->>EC: await getCommand() → executeCommand()
+        EC-->>PP: CommandResult {success, energyCost}
+        PP->>PP: player.energy -= energyCost
+    end
 
-    class CanvasRenderer {
-        -HTMLCanvasElement canvas
-        -CanvasRenderingContext2D ctx
-        -number cellWidth / cellHeight
-        +render(terminal)
-        +resize(cols, rows)
-        +clearCanvas()
-    }
+    GL->>PM: processMonsters()
+    loop each monster with energy >= 100
+        PM->>PM: monsterTakeTurn() → move / attack / cast
+        PM->>PM: monster.energy -= 100
+    end
 
-    class KeyboardInputProvider {
-        -PendingKey[] keyQueue
-        -string lastCommand?
-        -number lastDirection?
-        +onKeypress callback?
-        +consumeCommand() string?
-        +consumeDirection() number?
-        +request(req) Promise~InputResponse~
-        +flush()
-    }
+    GL->>PW: processWorld()
+    PW->>PW: regenerateHP / regenerateMana
+    PW->>PW: processHunger (every 10 turns)
+    PW->>PW: decreaseTimeouts
 
-    class CommandInputProvider {
-        <<interface>>
-        +getCommand() Promise~GameCommand~
-    }
+    GL->>GL: player.energy += turnEnergy(speed)
+    GL->>GL: state.turn++
 
-    GameBridge ..|> CommandInputProvider
-    GameBridge --> Terminal
-    GameBridge --> CanvasRenderer
-    GameBridge --> KeyboardInputProvider
-    GameBridge --> GameState
-    CanvasRenderer --> Terminal : render()
+    alt stairs used
+        GL->>GL: changeLevel() → generateDungeon()
+    end
 ```
 
-### 1-5. Command System Type Relationship Diagram
+---
+
+## 4. Command System
 
 ```mermaid
 classDiagram
@@ -329,27 +310,19 @@ classDiagram
 
     class CommandType {
         <<enumeration>>
-        WALK
-        RUN
-        OPEN / CLOSE
-        TUNNEL / DISARM
-        SEARCH
+        WALK / RUN
+        OPEN / CLOSE / TUNNEL / DISARM
         GO_UP / GO_DOWN
-        ATTACK
-        FIRE / THROW
-        CAST
-        EAT / QUAFF / READ
-        AIM / ZAP
-        PICKUP / DROP
-        EQUIP / UNEQUIP
-        REST
+        ATTACK / FIRE / THROW
+        CAST / STUDY
+        EAT / QUAFF / READ / AIM / ZAP
+        PICKUP / DROP / EQUIP / UNEQUIP
+        REST / SEARCH
     }
 
     class GameCommand {
-        <<discriminated union>>
         +CommandType type
         +number direction?
-        +Loc target?
         +number itemIndex?
         +number spellIndex?
     }
@@ -360,320 +333,63 @@ classDiagram
         +string[] messages
     }
 
-    class AttackResult {
-        +boolean hit
-        +number damage
-        +BlowEffect effect
-        +BlowMethod method
-        +string message
-        +BlowEffectResult effectResult?
-        +number critical
-    }
-
-    class BlowEffectResult {
-        +number damage
-        +StatusEffect statusEffect?
-        +string message
-    }
-
     GameCommand ..> CommandType
     GameCommand --> CommandResult : executeCommand()
-    AttackResult --> BlowEffectResult
 ```
 
 ---
 
-## 2. Sequence Diagrams
-
-### 2-1. Main Game Loop (Flow of One Turn)
+## 5. AI Infrastructure
 
 ```mermaid
-sequenceDiagram
-    participant GL as runGameLoop
-    participant FOV as updateView
-    participant EB as EventBus
-    participant PP as processPlayer
-    participant GB as GameBridge
-    participant KB as KeyboardInput
-    participant EC as executeCommand
-    participant PM as processMonsters
-    participant MT as monsterTakeTurn
-    participant MA as monsterAttackPlayer
-    participant PW as processWorld
-    participant CL as changeLevel
-
-    GL->>FOV: updateView(chunk, player.grid)
-    FOV-->>GL: FOV flags updated (SEEN/VIEW)
-
-    GL->>EB: emit(REFRESH)
-    EB-->>GB: -> drawAll() + doRender()
-
-    alt player.energy >= MOVE_ENERGY
-        GL->>PP: processPlayer(state, input)
-        PP->>GB: await getCommand()
-        GB->>KB: waitForKey()
-        KB-->>GB: KeyboardEvent
-        GB->>GB: consumeDirection / consumeCommand
-        GB-->>PP: GameCommand
-
-        PP->>EC: executeCommand(cmd, player, chunk, rng)
-        EC-->>PP: CommandResult {success, energyCost, messages}
-        PP->>PP: player.energy -= energyCost
-        PP-->>GL: usedEnergy: boolean
-
-        alt player.isDead
-            GL->>GL: break (death)
-        end
-        alt player.totalWinner
-            GL->>GL: break (victory)
-        end
-        alt !usedEnergy
-            GL->>GL: continue (re-prompt)
-        end
+graph LR
+    subgraph "AI Player (tools/)"
+        BP["busho-player.ts<br/>BFS pathfinding<br/>Combat decisions<br/>Retreat logic"]
     end
 
-    GL->>PM: processMonsters(state, monsters)
-    loop each living monster
-        PM->>PM: mon.energy += turnEnergy(mspeed)
-        loop mon.energy >= MOVE_ENERGY
-            PM->>MT: monsterTakeTurn(chunk, mon, playerLoc, rng)
-            MT-->>PM: MonsterAction {type, target}
-            alt action = "attack"
-                PM->>MA: monsterAttackPlayer(mon, player, rng)
-                MA-->>PM: AttackResult[] (hit/miss per blow)
-                PM->>PM: apply damage, check death
-            else action = "move"
-                PM->>PM: monsterMove(chunk, mon, target)
-            else action = "idle"
-                Note over PM: do nothing
-            end
-            PM->>PM: mon.energy -= MOVE_ENERGY
-            alt player.isDead
-                PM-->>GL: break
-            end
-        end
+    subgraph "AI Server (core/borg/)"
+        AS["ai-server.ts<br/>HTTP API"]
+        GS["GameState<br/>(headless)"]
+        AS --> GS
     end
 
-    GL->>PW: processWorld(state)
-    PW->>PW: regenerateHP / regenerateMana
-    PW->>PW: processHunger (every 10 turns)
-    PW->>PW: decreaseTimeouts
-
-    GL->>GL: player.energy += turnEnergy(speed)
-    GL->>GL: state.turn++
-
-    alt checkLevelChange(state)
-        GL->>CL: changeLevel(state, newDepth)
-        CL->>CL: decrement old monsters curNum
-        CL->>CL: generateDungeon(depth, config, rng, races)
-        CL->>CL: state.chunk = newChunk
-        CL->>CL: state.monsters = newChunk.monsters
-        CL->>EB: emit(NEW_LEVEL_DISPLAY)
+    subgraph "C Borg (external)"
+        CB["C Borg Client"]
     end
+
+    subgraph "Remote Server (core/borg/)"
+        RS["remote-server.ts<br/>TCP protocol"]
+        RS --> GS
+    end
+
+    BP -->|"GET /state<br/>POST /command"| AS
+    CB -->|"KEY/FRAME<br/>TCP"| RS
+
+    style BP fill:#a4e,stroke:#333,color:#fff
+    style AS fill:#a4e,stroke:#333,color:#fff
+    style RS fill:#48e,stroke:#333,color:#fff
 ```
 
-### 2-2. Startup to Game Start Sequence
+### AI Server HTTP API
 
-```mermaid
-sequenceDiagram
-    participant M as main()
-    participant FS as fetch (JSON)
-    participant ML as monster-loader
-    participant BS as BirthScreen
-    participant B as birth.ts
-    participant DG as generateDungeon
-    participant GB as GameBridge
-    participant GL as runGameLoop
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/state` | GET | Full game state as JSON |
+| `/command` | POST | Execute GameCommand, return result + state |
+| `/health` | GET | Server health check |
 
-    M->>M: setupCanvas()
-    M->>M: buildDefaultFeatureInfo()
+### Remote Server TCP Protocol
 
-    par Parallel data loading
-        M->>FS: fetch p_race.json
-        M->>FS: fetch class.json
-        M->>FS: fetch monster.json
-        M->>FS: fetch monster_base.json
-    end
-    FS-->>M: raceData, classData, monsterData, monsterBaseData
-
-    M->>ML: parseMonsterBases(monsterBaseData)
-    ML-->>M: Map~string, MonsterBase~
-    M->>ML: parseMonsterRaces(monsterData, bases)
-    ML-->>M: MonsterRace[]
-
-    M->>M: RNG.stateInit(Date.now())
-
-    alt Save data exists
-        M->>M: tryLoadSavedGame(rng)
-        alt Load successful
-            M->>M: askContinue(canvas)
-            alt Continue
-                M->>M: state = loadedState
-            else New game
-                M->>M: clearSave()
-                M->>BS: runBirthScreen(canvas, races, classes)
-            end
-        else Load failed
-            M->>BS: runBirthScreen(canvas, races, classes)
-        end
-    else No save data
-        M->>BS: runBirthScreen(canvas, races, classes)
-    end
-
-    BS->>BS: Phase 0: Title screen
-    BS->>BS: Phase 1: Race selection (11 races)
-    BS->>BS: Phase 2: Class selection (9 classes)
-    BS->>BS: Phase 3: Name input
-    BS-->>M: BirthResult {name, race, class}
-
-    M->>B: createPlayer(name, race, class, rng)
-    B->>B: rollStats() / rollHP()
-    B-->>M: Player (Lv1)
-
-    M->>DG: generateDungeon(depth=1, config, rng, monsterRaces)
-    DG->>DG: createChunk -> fillWithWalls
-    DG->>DG: carve rooms -> dig tunnels
-    DG->>DG: placeStairs / populateMonsters / populateObjects
-    DG-->>M: Chunk (with monsters)
-
-    M->>M: createGameState(player, chunk, rng, monsterRaces)
-    M->>GB: new GameBridge(canvas, state, input)
-    M->>GB: bridge.start()
-    GB->>GB: subscribe events (REFRESH, HP, MANA, ...)
-    GB->>GL: runGameLoop(state, this)
-    Note over GL: Game loop starts
-```
-
-### 2-3. Monster Melee Attack Sequence
-
-```mermaid
-sequenceDiagram
-    participant PM as processMonsters
-    participant MT as monsterTakeTurn
-    participant MA as monsterAttackPlayer
-    participant RB as resolveBlowMethod
-    participant TH as testHit
-    participant CD as calculateBlowDamage
-    participant RE as resolveBlowEffect
-    participant GS as GameState
-
-    PM->>MT: monsterTakeTurn(chunk, mon, playerLoc, rng)
-    MT->>MT: check: sleep? held? stunned? confused?
-    MT->>MT: calculate distance (Chebyshev)
-    alt distance <= 1 and !NEVER_BLOW
-        MT-->>PM: {type: "attack", target: playerLoc}
-    end
-
-    PM->>MA: monsterAttackPlayer(mon, player, rng)
-
-    alt NEVER_BLOW flag
-        MA-->>PM: [] (empty array)
-    end
-
-    loop each blow in mon.race.blows
-        alt blow.method == NONE
-            Note over MA: break (end of attack list)
-        end
-
-        MA->>RB: resolveBlowMethod(method, effect, mon, playerAc, rng)
-        RB->>RB: toHit = max(level,1)*3 + effectPower
-        RB->>TH: testHit(toHit, ac, rng)
-        TH->>TH: 5% auto-hit check
-        TH->>TH: randint1(toHit) >= ac*3/4
-        TH-->>RB: hit: boolean
-        RB-->>MA: hit
-
-        alt Hit
-            MA->>CD: calculateBlowDamage(blow, rlev, mon, rng)
-            CD->>CD: randcalc(blow.dice) +/- stun penalty
-            CD-->>MA: rawDamage
-
-            MA->>RE: resolveBlowEffect(effect, rawDamage, playerAc)
-            RE->>RE: adjustDamArmor(damage, ac)
-            RE->>RE: effectToStatusKind(effect)
-            RE-->>MA: {damage, statusEffect, message}
-
-            MA->>MA: monsterCritical(dice, rlev, damage, rng)
-        else Miss
-            MA->>MA: miss message
-        end
-    end
-
-    MA-->>PM: AttackResult[]
-
-    PM->>PM: totalDamage = sum of result.damage
-    PM->>GS: player.chp -= totalDamage
-    alt player.chp <= 0
-        PM->>GS: player.isDead = true
-        PM->>GS: state.dead = true
-        PM->>GS: player.diedFrom = mon.race.name
-    end
-```
-
-### 2-4. Dungeon Generation Sequence
-
-```mermaid
-sequenceDiagram
-    participant GD as generateDungeon
-    participant CC as createChunk
-    participant RG as Room Generators
-    participant TN as digTunnel
-    participant PS as placeStairs
-    participant PP as populateMonsters
-    participant MK as make.ts
-    participant PO as populateObjects
-
-    GD->>CC: createChunk(height, width, depth)
-    CC-->>GD: Chunk (empty grid)
-
-    GD->>GD: fillWithWalls(chunk)
-    Note over GD: Outer walls=PERM, Interior=GRANITE
-
-    loop roomAttempts times
-        GD->>GD: pick random center + builder
-        GD->>RG: generateSimpleRoom / OverlappingRoom / CrossRoom / etc.
-        RG->>RG: carve floor, set ROOM flag
-        RG-->>GD: Room {center, bounds}
-    end
-
-    loop Connect rooms in order
-        GD->>TN: digTunnel(room[i].center, room[i+1].center)
-        TN->>TN: L-shaped excavation (horizontal->vertical or vertical->horizontal)
-        TN->>TN: GRANITE -> FLOOR, place doors
-    end
-
-    GD->>PS: placeStairs(chunk, upLoc, downLoc)
-    PS->>PS: FLOOR -> LESS (up stairs), FLOOR -> MORE (down stairs)
-
-    GD->>PP: populateMonsters(chunk, depth, density, races, rng)
-    loop density times
-        PP->>PP: findEmptyFloor(chunk, rng)
-        PP->>MK: pickMonsterRace(depth, races, rng)
-        MK-->>PP: MonsterRace (weighted by depth and rarity)
-        PP->>MK: placeNewMonster(chunk, pos, race, ...)
-        MK->>MK: createMonster(race, rng)
-        Note over MK: Initialize HP, speed, sleep, energy
-        MK->>MK: square.mon = midx, chunk.monMax++
-        MK->>MK: race.curNum++
-        MK-->>PP: Monster
-        PP->>PP: chunk.monsters.push(mon)
-    end
-
-    GD->>PO: populateObjects(chunk, depth, density, kinds, rng)
-    GD->>GD: placeTraps(chunk, depth, count, rng)
-
-    GD-->>GD: return chunk
-```
+Server sends screen as `FRAME/ROW/CURSOR/STAT/INVEN/END` messages.
+Client responds with `KEY <code> <mods>`.
 
 ---
 
-## 3. State Transition Diagrams
-
-### 3-1. Overall Game State Transitions
+## 6. State Transitions
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TitleScreen : App launch
+    [*] --> TitleScreen : App start
 
     TitleScreen --> SaveCheck : Press any key
 
@@ -686,372 +402,83 @@ stateDiagram-v2
 
     state CharacterCreation {
         [*] --> RaceSelect
-        RaceSelect --> ClassSelect : Race selected
-        ClassSelect --> NameInput : Class selected
-        NameInput --> [*] : Name confirmed
+        RaceSelect --> ClassSelect
+        ClassSelect --> NameInput
+        NameInput --> [*]
     }
 
-    CharacterCreation --> DungeonGeneration : Player created
-
-    DungeonGeneration --> GameLoop : Chunk generation complete
+    CharacterCreation --> GameLoop : Player created
 
     state GameLoop {
         [*] --> FOVUpdate
-        FOVUpdate --> WaitInput : energy >= 100
+        FOVUpdate --> PlayerInput : energy >= 100
         FOVUpdate --> MonsterPhase : energy < 100
 
-        WaitInput --> CommandExec : GameCommand received
-        CommandExec --> DeathCheck1 : Command executed
+        PlayerInput --> CommandExec
+        CommandExec --> DeathCheck1
 
         DeathCheck1 --> MonsterPhase : Alive
         DeathCheck1 --> Dead : HP <= 0
 
-        MonsterPhase --> DeathCheck2 : Monster processing complete
+        MonsterPhase --> DeathCheck2
         DeathCheck2 --> WorldPhase : Alive
         DeathCheck2 --> Dead : HP <= 0
 
-        WorldPhase --> EnergyGrant : HP/MP regen, hunger, timed effects
-        EnergyGrant --> TurnIncrement : energy += turnEnergy(speed)
-        TurnIncrement --> LevelCheck : turn++
+        WorldPhase --> EnergyGrant
+        EnergyGrant --> LevelCheck
 
-        LevelCheck --> FOVUpdate : Same floor
-        LevelCheck --> LevelTransition : Stairs used
+        LevelCheck --> FOVUpdate : Same level
+        LevelCheck --> LevelTransition : Stairs
     }
 
-    state LevelTransition {
-        [*] --> CurNumReset : Old monsters curNum--
-        CurNumReset --> NewDungeon : generateDungeon()
-        NewDungeon --> PlayerPlace : Place at stairs location
-        PlayerPlace --> [*] : State updated
-    }
-
-    LevelTransition --> GameLoop : New level starts
-
-    state Dead {
-        [*] --> Tombstone : Display tombstone
-        Tombstone --> [*] : any key
-    }
-
-    state Victory {
-        [*] --> VictoryScreen : Victory message
-        VictoryScreen --> [*] : any key
-    }
-
-    GameLoop --> Dead : player.isDead
-    GameLoop --> Victory : player.totalWinner
-    Dead --> [*] : Save deleted
-    Victory --> [*] : Save deleted
-```
-
-### 3-2. Monster AI State Transitions
-
-```mermaid
-stateDiagram-v2
-    [*] --> CheckSleep : monsterTakeTurn()
-
-    CheckSleep --> Idle : Sleeping (mTimed[SLEEP] > 0)
-    Note right of Idle : sleep--
-
-    CheckSleep --> CheckHold : Awake
-
-    CheckHold --> Idle : Held (mTimed[HOLD] > 0)
-    CheckHold --> CheckStun : Free
-
-    CheckStun --> Idle : Stunned + 50% failure
-    CheckStun --> CheckConfusion : Can act
-
-    CheckConfusion --> RandomMove : Confused
-    CheckConfusion --> CheckRandomFlags : Normal
-
-    CheckRandomFlags --> RandomMove : RAND_50 (50%) or RAND_25 (25%)
-    CheckRandomFlags --> CheckFear : Normal movement
-
-    CheckFear --> Flee : Afraid or FRIGHTENED flag
-    CheckFear --> CheckNeverMove : Not afraid
-
-    CheckNeverMove --> AdjacentCheck1 : NEVER_MOVE flag
-    CheckNeverMove --> DistanceCalc : Can move
-
-    state AdjacentCheck1 <<choice>>
-    AdjacentCheck1 --> Attack : Adjacent & !NEVER_BLOW
-    AdjacentCheck1 --> Idle : Not adjacent
-
-    DistanceCalc --> AdjacentCheck2 : Calculate distance (Chebyshev)
-
-    state AdjacentCheck2 <<choice>>
-    AdjacentCheck2 --> Attack : dist <= 1 & !NEVER_BLOW
-    AdjacentCheck2 --> Flee : dist <= 1 & NEVER_BLOW
-    AdjacentCheck2 --> Pathfind : dist > 1
-
-    Pathfind --> Move : Path found
-    Pathfind --> RandomMove : No path -> random
-    Pathfind --> Idle : No valid destination
-
-    state ActionResult <<choice>>
-    Attack --> ActionResult
-    Move --> ActionResult
-    Flee --> ActionResult
-    RandomMove --> ActionResult
-    Idle --> ActionResult
-    ActionResult --> [*] : Return MonsterAction
-```
-
-### 3-3. Player Command Input State Transitions
-
-```mermaid
-stateDiagram-v2
-    [*] --> WaitKey : getCommand()
-
-    WaitKey --> DirectionCheck : Keypress received
-
-    state DirectionCheck <<choice>>
-    DirectionCheck --> PendingDirCheck : Direction key detected
-    DirectionCheck --> CommandCheck : No direction
-
-    PendingDirCheck --> CompleteDirCmd : pendingCmd exists
-    PendingDirCheck --> WalkCommand : No pendingCmd
-
-    CompleteDirCmd --> [*] : GameCommand (open/close/tunnel etc.)
-    WalkCommand --> [*] : WALK {direction}
-
-    state CommandCheck <<choice>>
-    CommandCheck --> HelpScreen : "help"
-    CommandCheck --> LookCmd : "look"
-    CommandCheck --> DirPrompt : "open/close/tunnel/disarm/bash"
-    CommandCheck --> InventoryScreen : "inventory"
-    CommandCheck --> EquipScreen : "equipment"
-    CommandCheck --> ItemSelect : "quaff/eat/read/zap/aim"
-    CommandCheck --> EquipManage : "wield/takeoff/drop"
-    CommandCheck --> SpellSelect : "cast/pray"
-    CommandCheck --> StudySelect : "study"
-    CommandCheck --> SaveCmd : "save"
-    CommandCheck --> SimpleCmd : "go_up/go_down/search/rest/pickup"
-    CommandCheck --> Unhandled : Unknown command
-
-    HelpScreen --> WaitKey : ESC/Space/Enter
-    LookCmd --> WaitKey : Display message
-
-    DirPrompt --> WaitKey : Set pendingDirectionCmd
-
-    InventoryScreen --> WaitKey : ESC/Space/Enter
-    EquipScreen --> WaitKey : ESC/Space/Enter
-
-    state ItemSelect {
-        [*] --> FilterItems : Apply filter
-        FilterItems --> ShowList : Matching items found
-        FilterItems --> NoItems : No items
-        ShowList --> LetterSelect : Select a-z
-        LetterSelect --> [*]
-        NoItems --> [*]
-    }
-
-    ItemSelect --> [*] : GameCommand (QUAFF/EAT/READ etc.)
-    ItemSelect --> WaitKey : ESC cancel
-
-    SpellSelect --> [*] : GameCommand (CAST)
-    SpellSelect --> WaitKey : ESC cancel
-
-    StudySelect --> WaitKey : Learning complete or ESC
-
-    EquipManage --> [*] : GameCommand (EQUIP/UNEQUIP/DROP)
-    EquipManage --> WaitKey : ESC cancel
-
-    SaveCmd --> WaitKey : Save to localStorage
-
-    SimpleCmd --> [*] : GameCommand
-    Unhandled --> WaitKey : Error message
-```
-
-### 3-4. Energy System State Transitions
-
-```mermaid
-stateDiagram-v2
-    [*] --> EnergyGrant : Turn start
-
-    state EnergyGrant {
-        [*] --> CalcEnergy
-        CalcEnergy : energy += EXTRACT_ENERGY[speed]
-        Note right of CalcEnergy : Table has 180 entries (speed 0-179)\nspeed 110 -> +10/tick
-        CalcEnergy --> [*]
-    }
-
-    EnergyGrant --> EnergyCheck
-
-    state EnergyCheck <<choice>>
-    EnergyCheck --> CanAct : energy >= 100
-    EnergyCheck --> WaitTick : energy < 100
-
-    CanAct --> ActionExec : Command/AI decision
-    ActionExec --> EnergyDeduct : Action executed
-
-    state EnergyDeduct {
-        [*] --> Deduct
-        Deduct : energy -= MOVE_ENERGY (100)
-        Deduct --> [*]
-    }
-
-    EnergyDeduct --> EnergyCheck : Check remaining energy
-    WaitTick --> EnergyGrant : Next tick
-
-    note right of EnergyCheck
-        Speed 110: 1 action per 10 ticks
-        Speed 120: 1 action per 5 ticks
-        Speed 130: ~1 action per 3 ticks
-        Speed 80: ~1 action per 17 ticks
-    end note
-```
-
-### 3-5. Save/Load State Transitions
-
-```mermaid
-stateDiagram-v2
-    [*] --> Playing : In game
-
-    state Playing {
-        [*] --> Normal
-        Normal --> SaveTrigger : Ctrl+S
-        SaveTrigger --> Serialize : saveGameToJSON()
-        Serialize --> WriteLS : localStorage.setItem()
-        WriteLS --> Normal : "Game saved" message
-    }
-
-    Playing --> Death : HP <= 0
-    Playing --> Victory : totalWinner
-
-    Death --> ClearSave : localStorage.removeItem()
-    Victory --> ClearSave : localStorage.removeItem()
-    ClearSave --> [*]
-
-    state StartupLoad {
-        [*] --> CheckLS : localStorage.getItem()
-        CheckLS --> HasSave : JSON string exists
-        CheckLS --> NoSave : null
-        HasSave --> Parse : JSON.parse()
-        Parse --> Validate : validateSaveData()
-        Validate --> LoadOK : Version compatible
-        Validate --> LoadFail : Incompatible
-        LoadOK --> PatchRace : Restore race/class templates
-        PatchRace --> RestoreRNG : Restore RNG state
-        RestoreRNG --> AskContinue : "Continue or New?"
-        AskContinue --> ResumeGame : Continue (C)
-        AskContinue --> DiscardSave : New game (N)
-        LoadFail --> DiscardSave
-        DiscardSave --> NoSave
-        NoSave --> NewGame : Go to character creation
-    }
-
-    [*] --> StartupLoad : App launch
-
-    state SaveData {
-        version : "1.0.0"
-        --
-        player : PlayerSaveData
-        dungeon : DungeonSaveData
-        rngState : WELL1024a State
-        messages : GameMessage[200]
-        turn / depth / dead / won
-    }
+    LevelTransition --> GameLoop
+    GameLoop --> Dead : isDead
+    GameLoop --> Victory : totalWinner
+    Dead --> [*]
+    Victory --> [*]
 ```
 
 ---
 
-## 4. Package Structure Diagram
+## 7. Energy System
 
-```mermaid
-graph TB
-    subgraph "@angband/web"
-        main["main.ts<br/>Entry point"]
-        bridge["game-bridge.ts<br/>UI-Core bridge"]
-        kbinput["keyboard-input.ts<br/>Keyboard input"]
-        birth["birth-screen.ts<br/>Character creation screen"]
-        term["terminal.ts<br/>80x24 character grid"]
-        renderer["canvas-renderer.ts<br/>Canvas rendering"]
-        colors["color-palette.ts<br/>29 color definitions"]
-    end
-
-    subgraph "@angband/core"
-        subgraph "game/"
-            state["state.ts<br/>GameState"]
-            world["world.ts<br/>Game loop"]
-            event["event.ts<br/>EventBus"]
-        end
-        subgraph "command/"
-            core_cmd["core.ts<br/>executeCommand"]
-            movement["movement.ts<br/>Movement & stairs"]
-            combat["combat.ts<br/>Player attack"]
-            item_cmd["item.ts<br/>Item usage"]
-            magic_cmd["magic.ts<br/>Spellcasting"]
-        end
-        subgraph "monster/"
-            move["move.ts<br/>AI & movement"]
-            attack["attack.ts<br/>Melee attack resolution"]
-            make["make.ts<br/>Spawning & placement"]
-        end
-        subgraph "generate/"
-            gen["generate.ts<br/>Dungeon generation"]
-            populate["populate.ts<br/>Placement processing"]
-        end
-        subgraph "cave/"
-            chunk["chunk.ts<br/>Chunk management"]
-            square["square.ts<br/>Square operations"]
-            view["view.ts<br/>FOV calculation"]
-        end
-        subgraph "save/"
-            save["save.ts<br/>Serialization"]
-            load["load.ts<br/>Deserialization"]
-        end
-        subgraph "data/"
-            mloader["monster-loader.ts<br/>JSON parser"]
-        end
-        subgraph "player/"
-            pbirth["birth.ts<br/>Player creation"]
-            spell["spell.ts<br/>Spell management"]
-        end
-        subgraph "z/"
-            rng["rand.ts<br/>RNG (WELL1024a)"]
-            bitflag["bitflag.ts<br/>BitFlag"]
-            color["color.ts<br/>Color conversion"]
-        end
-        subgraph "types/"
-            tplayer["player.ts"]
-            tmonster["monster.ts"]
-            tcave["cave.ts"]
-            tobject["object.ts"]
-        end
-    end
-
-    main --> bridge
-    main --> birth
-    main --> mloader
-    main --> pbirth
-    main --> gen
-
-    bridge --> world
-    bridge --> kbinput
-    bridge --> term
-    bridge --> renderer
-    bridge --> save
-
-    world --> core_cmd
-    world --> move
-    world --> attack
-    world --> view
-    world --> gen
-    world --> event
-
-    core_cmd --> movement
-    core_cmd --> combat
-    core_cmd --> item_cmd
-    core_cmd --> magic_cmd
-
-    gen --> chunk
-    gen --> populate
-    populate --> make
-
-    style main fill:#4a9,stroke:#333,color:#fff
-    style bridge fill:#4a9,stroke:#333,color:#fff
-    style world fill:#e84,stroke:#333,color:#fff
-    style state fill:#e84,stroke:#333,color:#fff
-    style gen fill:#48e,stroke:#333,color:#fff
-    style attack fill:#e44,stroke:#333,color:#fff
 ```
+Speed 110 (normal): +10 energy/tick → 1 action per 10 ticks
+Speed 120 (fast):   +20 energy/tick → 1 action per 5 ticks
+Speed 130 (v.fast): +30 energy/tick → 1 action per ~3 ticks
+Speed  80 (slow):   +6 energy/tick  → 1 action per ~17 ticks
+
+Action cost: 100 energy (MOVE_ENERGY)
+Energy table: EXTRACT_ENERGY[speed], 200 entries (index 0-199 → 1-49)
+```
+
+---
+
+## 8. Data Pipeline
+
+```
+Build time:  .txt files → data-converter → .json files
+Runtime:     .json files → loaders → TypeScript objects → GameState
+
+Loaded data:
+  monster.json + monster_base.json → MonsterRace[]
+  object.json                      → ObjectKind[]
+  artifact.json                    → Artifact[]
+  ego_item.json                    → EgoItem[]
+  p_race.json                      → PlayerRace[]
+  class.json                       → PlayerClass[]
+```
+
+---
+
+## 9. Design Principles
+
+| Principle | Implementation |
+|-----------|---------------|
+| **Core isolation** | `@angband/core` has zero DOM/Node dependencies |
+| **Type safety** | TypeScript strict mode, noUncheckedIndexedAccess |
+| **Async input** | Game loop uses `async/await` for UI input |
+| **Event-driven** | EventBus decouples core from UI |
+| **JSON save** | Save/load via JSON + localStorage |
+| **Data-driven** | All game data loaded from external JSON files |
+| **Faithful port** | Game algorithms match C Angband 4.2.6 |
