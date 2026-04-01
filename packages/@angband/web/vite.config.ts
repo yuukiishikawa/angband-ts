@@ -11,5 +11,6 @@ export default defineConfig({
     alias: {
       "@angband/core": resolve(__dirname, "../core/src"),
     },
+    extensions: [".ts", ".js", ".tsx", ".jsx", ".json"],
   },
 });
