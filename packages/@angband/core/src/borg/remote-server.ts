@@ -322,6 +322,33 @@ function loadJSON(name: string): unknown[] {
  *   END
  */
 let _invenFrameCounter = 0;
+/** Encode item ObjectFlags as 16-char hex string (64 bits). */
+function encodeItemFlags(item: ObjectType): string {
+  // Merge item.flags and item.kind.flags
+  let bits = BigInt(0);
+  const checkFlag = (f: number) => {
+    if (item.flags?.has?.(f) || item.kind?.flags?.has?.(f)) {
+      bits |= BigInt(1) << BigInt(f);
+    }
+  };
+  // Check all known flags (0..63)
+  for (let i = 0; i < 64; i++) checkFlag(i);
+  return bits.toString(16).padStart(16, "0");
+}
+
+/** Encode item element resistances as 8-char hex string (32 bits).
+ *  Bit N set = item grants resistance to element N. */
+function encodeItemResists(item: ObjectType): string {
+  let bits = 0;
+  const elInfo = item.elInfo?.length ? item.elInfo : item.kind?.elInfo;
+  if (elInfo) {
+    for (let i = 0; i < elInfo.length && i < 32; i++) {
+      if (elInfo[i] && elInfo[i]!.resLevel > 0) bits |= (1 << i);
+    }
+  }
+  return (bits >>> 0).toString(16).padStart(8, "0");
+}
+
 function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: ScreenRenderer): string {
   const lines: string[] = ["FRAME"];
 
@@ -356,7 +383,9 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
   );
 
   // Inventory and equipment for C borg's borg_items[]
-  // Format: INVEN <slot> <tval> <sval> <qty> <toH> <toD> <toA> <dd> <ds> <ac> <weight> <pval> <timeout> <name>
+  // Format: INVEN <slot> <tval> <sval> <qty> <toH> <toD> <toA> <dd> <ds> <ac> <weight> <pval> <timeout> <flags_hex> <resists_hex> <name>
+  // flags_hex: 64-bit hex of ObjectFlag bits (e.g. "0000000000000040" for FREE_ACT)
+  // resists_hex: 32-bit hex of element resistance bits (bit N = has resist for element N)
   const pGear = p as Player & { inventory?: ObjectType[]; equipment?: (ObjectType | null)[] };
 
   // Pack inventory (slots 0..22)
@@ -367,7 +396,9 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
       if (!item.kind) { if (_invenFrameCounter <= 2) process.stderr.write(`  [INVEN-SKIP] slot=${i} kind=null tval=${item.tval}\n`); continue; }
       const name = item.kind.name.replace(/ /g, "_");
       const pval = typeof item.pval === "number" ? item.pval : 0;
-      const line = `INVEN ${i} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${name}`;
+      const flagsHex = encodeItemFlags(item);
+      const resistsHex = encodeItemResists(item);
+      const line = `INVEN ${i} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${flagsHex} ${resistsHex} ${name}`;
       if (_invenFrameCounter <= 2) process.stderr.write(`  [INVEN-SEND] ${line}\n`);
       lines.push(line);
     }
@@ -413,7 +444,9 @@ function serializeFrame(screen: ScreenBuffer, state: GameState, renderer: Screen
       const cSlot = 23 + bodyIdx; // pack_size=23, INVEN_WIELD=23+0
       const name = item.kind.name.replace(/ /g, "_");
       const pval = typeof item.pval === "number" ? item.pval : 0;
-      lines.push(`INVEN ${cSlot} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${name}`);
+      const eqFlagsHex = encodeItemFlags(item);
+      const eqResistsHex = encodeItemResists(item);
+      lines.push(`INVEN ${cSlot} ${item.tval} ${item.sval} ${item.number} ${item.toH} ${item.toD} ${item.toA} ${item.dd} ${item.ds} ${item.ac} ${item.weight} ${pval} ${item.timeout ?? 0} ${eqFlagsHex} ${eqResistsHex} ${name}`);
     }
   }
 
@@ -748,7 +781,7 @@ export class RemoteBorgServer {
     if (!this.client || !this.state) return;
     // Replenish healing potions:
     // 1) On descent to a new dungeon level (simulates town resupply)
-    // 2) Every 200 frames at any depth (prevents potion exhaustion)
+    // 2) Every 100 frames at any depth (prevents potion exhaustion)
     const curDepth = this.state.depth;
     if (curDepth > this.prevDepth && curDepth > 0) {
       this.replenishSupplies();
@@ -757,7 +790,7 @@ export class RemoteBorgServer {
     }
     this.prevDepth = curDepth;
     this.framesSinceResupply++;
-    if (this.framesSinceResupply >= 200 && curDepth > 0) {
+    if (this.framesSinceResupply >= 100 && curDepth > 0) {
       this.replenishSupplies();
       process.stderr.write(`[RESUPPLY] periodic (every 200 frames)\n`);
       this.framesSinceResupply = 0;
@@ -778,20 +811,21 @@ export class RemoteBorgServer {
     if (!p.inventory) return;
 
     const targets: { tval: number; name: string; targetQty: number }[] = [
-      { tval: 26, name: "Cure Light Wounds", targetQty: 20 },
-      { tval: 26, name: "Cure Serious Wounds", targetQty: 10 },
-      { tval: 26, name: "Cure Critical Wounds", targetQty: 10 },
-      { tval: 25, name: "Phase Door", targetQty: 10 },
+      { tval: 26, name: "Cure Light Wounds", targetQty: 30 },
+      { tval: 26, name: "Cure Serious Wounds", targetQty: 15 },
+      { tval: 26, name: "Cure Critical Wounds", targetQty: 15 },
+      { tval: 25, name: "Phase Door", targetQty: 15 },
       { tval: 25, name: "Teleportation", targetQty: 5 },
       { tval: 25, name: "Word of Recall", targetQty: 3 },
       { tval: 26, name: "Speed", targetQty: 5 },
+      { tval: 28, name: "Ration of Food", targetQty: 5 },
     ];
 
     const cleanName = (n: string) => n.replace(/^& /, "").replace(/~/, "").trim().toLowerCase();
     for (const target of targets) {
       // Find existing stack in inventory
       const existing = p.inventory.find(
-        (item) => item.tval === target.tval && item.kind && cleanName(item.kind.name) === target.name.toLowerCase(),
+        (item) => item != null && item.tval === target.tval && item.kind && cleanName(item.kind.name) === target.name.toLowerCase(),
       );
       if (existing) {
         if (existing.number < target.targetQty) {
@@ -805,7 +839,14 @@ export class RemoteBorgServer {
           (k) => k.tval === target.tval && cleanName(k.name) === target.name.toLowerCase(),
         );
         if (kind) {
-          p.inventory.push(createStartObject(kind, target.targetQty));
+          const newObj = createStartObject(kind, target.targetQty);
+          // Reuse a null slot if available (stable slot indices)
+          const nullIdx = p.inventory.findIndex((it) => it == null);
+          if (nullIdx >= 0) {
+            p.inventory[nullIdx] = newObj;
+          } else {
+            p.inventory.push(newObj);
+          }
           process.stderr.write(`[RESUPPLY] ${target.name}: new stack of ${target.targetQty}\n`);
         }
       }
