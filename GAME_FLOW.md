@@ -1,273 +1,273 @@
-# Angband ゲームフロー分析 & 実装状況
+# Angband Game Flow Analysis & Implementation Status
 
-## 全体フロー
+## Overall Flow
 
 ```
-┌──────────────┐    ┌──────────────┐    ┌──────────────────┐
-│  1. 起動     │───▶│  2. キャラ   │───▶│  3. 町（深度0）  │
-│  タイトル画面│    │  作成        │    │  ショップ & 準備 │
-└──────────────┘    └──────────────┘    └────────┬─────────┘
+┌──────────────┐    ┌──────────────┐    ┌───────────────────┐
+│  1. Startup  │───▶│  2. Character│───▶│  3. Town (Depth 0) │
+│  Title Screen│    │  Creation    │    │  Shops & Prep      │
+└──────────────┘    └──────────────┘    └────────┬──────────┘
                                                  │
                                                  ▼
                     ┌───────────────────────────────────────────┐
-                    │  4. メインゲームループ（各ターン）        │
+                    │  4. Main Game Loop (each turn)            │
                     │                                           │
-                    │  4a. プレイヤーフェーズ                   │
-                    │      エネルギー≥100 → コマンド入力 → 実行 │
+                    │  4a. Player Phase                         │
+                    │      Energy >= 100 → Command Input → Exec │
                     │                                           │
-                    │  4b. モンスターフェーズ                   │
-                    │      各モンスター：AI判断 → 移動/攻撃     │
+                    │  4b. Monster Phase                        │
+                    │      Each monster: AI decision → Move/Atk │
                     │                                           │
-                    │  4c. ワールドフェーズ                     │
-                    │      HP/MP回復、空腹、時限効果減少        │
+                    │  4c. World Phase                          │
+                    │      HP/MP regen, hunger, timed effects   │
                     │                                           │
-                    │  4d. エネルギー付与 & ターン進行          │
+                    │  4d. Energy Grant & Turn Advance          │
                     └──┬─────────────┬────────────┬─────────────┘
                        │             │            │
                        ▼             ▼            ▼
                 ┌──────────┐  ┌──────────┐  ┌──────────────┐
-                │ 5. 階段  │  │ 6. 死亡  │  │ 7. 勝利     │
-                │ 上下移動 │  │ 墓碑表示 │  │ Morgoth撃破 │
-                │ 新レベル │  │ スコア   │  │ スコア      │
-                │ 生成     │  │ 記録     │  │ 記録        │
+                │ 5. Stairs│  │ 6. Death │  │ 7. Victory   │
+                │ Up/Down  │  │ Tombstone│  │ Morgoth Kill │
+                │ New Level│  │ Score    │  │ Score        │
+                │ Generate │  │ Record   │  │ Record       │
                 └──────────┘  └──────────┘  └──────────────┘
 ```
 
 ---
 
-## フェーズ別 実装状況
+## Implementation Status by Phase
 
-### ✅ = 動作する | ⚠️ = コアにあるがUI未接続 | ❌ = 未実装
-
----
-
-### 1. 起動 & タイトル画面
-
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| タイトル画面表示 | ✅ | birth-screen.ts ASCIIアート |
-| "Press any key" 待機 | ✅ | |
+### ✅ = Working | ⚠️ = Core exists but UI not connected | ❌ = Not implemented
 
 ---
 
-### 2. キャラクター作成（Birth）
+### 1. Startup & Title Screen
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| 種族選択（11種族） | ✅ | p_race.json読込、ステータス表示 |
-| 職業選択（9職業） | ✅ | class.json読込、ステータス表示 |
-| 名前入力 | ✅ | ランダム名生成あり |
-| ステータスロール | ✅ | birth.ts rollStats() |
-| HPロール | ✅ | birth.ts rollHP() |
-| 年齢/身長/体重 | ✅ | birth.ts getAHW() |
-| 初期装備付与 | ⚠️ | classのstartItems存在するがロード未実装 |
-| 初期所持金 | ✅ | 600 gold |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Title screen display | ✅ | birth-screen.ts ASCII art |
+| "Press any key" prompt | ✅ | |
 
 ---
 
-### 3. 町レベル（深度0）
+### 2. Character Creation (Birth)
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| 町マップ生成 | ❌ | 深度0でもダンジョン生成される |
-| ショップ配置 | ❌ | Feat.STORE_*は定義あり、生成なし |
-| アイテム売買 | ⚠️ | store.ts実装済、UI未接続 |
-| 自宅（HOME） | ⚠️ | store.ts実装済、UI未接続 |
-
----
-
-### 4. メインゲームループ
-
-#### 4a. プレイヤーフェーズ — コマンド
-
-| コマンド | 状態 | 詳細 |
-|----------|------|------|
-| **移動（8方向）** | ✅ | 矢印/numpad/vi keys |
-| **壁衝突** | ✅ | granite, perm, rubble等 |
-| **ドア自動開放** | ✅ | 移動先がCLOSED→OPENに変更 |
-| **階段使用 < >** | ✅ | 深度変更 + 新レベル生成 |
-| **見回す /** | ✅ | 足元の地形表示 |
-| **ヘルプ ?** | ✅ | キー一覧表示 |
-| **近接攻撃** | ❌ | モンスターにぶつかっても何も起きない |
-| **射撃 f** | ❌ | スタブメッセージのみ |
-| **投擲 v** | ❌ | スタブメッセージのみ |
-| **ドアを開ける o** | ❌ | 「方向は？」表示のみ |
-| **ドアを閉める c** | ❌ | 「方向は？」表示のみ |
-| **探索 s** | ❌ | メッセージのみ、罠/秘密ドア検出なし |
-| **掘削 T** | ❌ | 未接続 |
-| **罠解除 D** | ❌ | 未接続 |
-| **体当たり B** | ❌ | 未接続 |
-| **魔法詠唱 m** | ❌ | 「呪文を知らない」表示のみ |
-| **アイテム拾い g** | ❌ | 「何もない」表示のみ |
-| **アイテム落とす d** | ❌ | 「何も持ってない」表示のみ |
-| **装備 w** | ❌ | 未接続 |
-| **外す t** | ❌ | 未接続 |
-| **インベントリ i** | ❌ | 「パックは空」表示のみ |
-| **装備一覧 e** | ❌ | 「装備なし」表示のみ |
-| **飲む q** | ❌ | 未接続 |
-| **読む r** | ❌ | 未接続 |
-| **食べる E** | ❌ | 未接続 |
-| **杖を振る z** | ❌ | 未接続 |
-| **杖を使う a** | ❌ | 未接続 |
-| **休憩 . R** | ❌ | メッセージのみ、回復なし |
-
-#### 4b. モンスターフェーズ
-
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| エネルギーシステム | ✅ | world.ts EXTRACT_ENERGY経由 |
-| モンスターAI | ✅ | move.ts monsterTakeTurn()経由 |
-| モンスター移動 | ✅ | processMonsters → monsterMove |
-| モンスター攻撃 | ✅ | processMonsters → monsterAttack |
-| モンスター魔法 | ⚠️ | spell.ts実装済だがUI未接続 |
-| モンスター表示 | ✅ | 種族別文字/色で表示（race.dChar/dAttr） |
-
-#### 4c. ワールドフェーズ
-
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| HP自然回復 | ⚠️ | world.ts regenerateHP()実装済 |
-| MP自然回復 | ⚠️ | world.ts regenerateMana()実装済 |
-| 空腹処理 | ⚠️ | world.ts processHunger()実装済 |
-| 時限効果減少 | ⚠️ | player/timed.ts実装済 |
-| ターン進行 | ✅（簡易） | state.turn++のみ |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Race selection (11 races) | ✅ | p_race.json loaded, stats displayed |
+| Class selection (9 classes) | ✅ | class.json loaded, stats displayed |
+| Name input | ✅ | Random name generation available |
+| Stat rolling | ✅ | birth.ts rollStats() |
+| HP rolling | ✅ | birth.ts rollHP() |
+| Age/height/weight | ✅ | birth.ts getAHW() |
+| Starting equipment | ⚠️ | Class startItems exist but loading not implemented |
+| Starting gold | ✅ | 600 gold |
 
 ---
 
-### 5. レベル遷移
+### 3. Town Level (Depth 0)
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| 上り階段検出 | ✅ | Feat.LESS |
-| 下り階段検出 | ✅ | Feat.MORE |
-| 新ダンジョン生成 | ✅ | generateDungeon() |
-| プレイヤー配置 | ✅ | placePlayerOnStairs() |
-| 深度追跡 | ✅ | state.depth更新 |
-| 最大深度追跡 | ✅ | player.maxDepth更新 |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Town map generation | ❌ | Dungeon is generated even at depth 0 |
+| Shop placement | ❌ | Feat.STORE_* defined but not generated |
+| Item buying/selling | ⚠️ | store.ts implemented, UI not connected |
+| Home (HOME) | ⚠️ | store.ts implemented, UI not connected |
 
 ---
 
-### 6. 死亡 & ゲームオーバー
+### 4. Main Game Loop
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| HP≤0判定 | ❌ | ダメージを受けないので死なない |
-| 死因記録 | ❌ | |
-| 墓碑表示 | ❌ | |
-| スコア記録 | ❌ | |
-| ゲームループ終了 | ⚠️ | state.deadチェックはあるが設定されない |
+#### 4a. Player Phase — Commands
+
+| Command | Status | Details |
+|---------|--------|---------|
+| **Movement (8-dir)** | ✅ | Arrow/numpad/vi keys |
+| **Wall collision** | ✅ | granite, perm, rubble, etc. |
+| **Auto door open** | ✅ | Moving into CLOSED → changes to OPEN |
+| **Stair use < >** | ✅ | Depth change + new level generation |
+| **Look around /** | ✅ | Shows terrain under feet |
+| **Help ?** | ✅ | Key list display |
+| **Melee attack** | ❌ | Nothing happens when bumping into a monster |
+| **Fire f** | ❌ | Stub message only |
+| **Throw v** | ❌ | Stub message only |
+| **Open door o** | ❌ | "Which direction?" prompt only |
+| **Close door c** | ❌ | "Which direction?" prompt only |
+| **Search s** | ❌ | Message only, no trap/secret door detection |
+| **Tunnel T** | ❌ | Not connected |
+| **Disarm D** | ❌ | Not connected |
+| **Bash B** | ❌ | Not connected |
+| **Cast spell m** | ❌ | "You don't know any spells" message only |
+| **Pick up item g** | ❌ | "Nothing here" message only |
+| **Drop item d** | ❌ | "You have nothing" message only |
+| **Wield/wear w** | ❌ | Not connected |
+| **Take off t** | ❌ | Not connected |
+| **Inventory i** | ❌ | "Pack is empty" message only |
+| **Equipment list e** | ❌ | "No equipment" message only |
+| **Quaff q** | ❌ | Not connected |
+| **Read r** | ❌ | Not connected |
+| **Eat E** | ❌ | Not connected |
+| **Zap wand z** | ❌ | Not connected |
+| **Activate staff a** | ❌ | Not connected |
+| **Rest . R** | ❌ | Message only, no recovery |
+
+#### 4b. Monster Phase
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Energy system | ✅ | Via world.ts EXTRACT_ENERGY |
+| Monster AI | ✅ | Via move.ts monsterTakeTurn() |
+| Monster movement | ✅ | processMonsters → monsterMove |
+| Monster attacks | ✅ | processMonsters → monsterAttack |
+| Monster spells | ⚠️ | spell.ts implemented but UI not connected |
+| Monster display | ✅ | Race-specific char/color (race.dChar/dAttr) |
+
+#### 4c. World Phase
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| HP natural regen | ⚠️ | world.ts regenerateHP() implemented |
+| MP natural regen | ⚠️ | world.ts regenerateMana() implemented |
+| Hunger processing | ⚠️ | world.ts processHunger() implemented |
+| Timed effect decay | ⚠️ | player/timed.ts implemented |
+| Turn progression | ✅ (basic) | state.turn++ only |
 
 ---
 
-### 7. 勝利
+### 5. Level Transition
 
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| Morgoth生成（深度100） | ❌ | |
-| Morgoth撃破判定 | ❌ | |
-| 勝利フラグ設定 | ❌ | |
-| 勝利画面 | ❌ | |
-
----
-
-### 8. セーブ/ロード
-
-| 機能 | 状態 | 備考 |
-|------|------|------|
-| JSON形式保存 | ⚠️ | save.ts実装済 |
-| ロード & 復元 | ⚠️ | load.ts実装済 |
-| UIからの保存操作 | ❌ | キーバインドなし |
-| UIからの読込操作 | ❌ | メニューなし |
-| オートセーブ | ❌ | |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Up stair detection | ✅ | Feat.LESS |
+| Down stair detection | ✅ | Feat.MORE |
+| New dungeon generation | ✅ | generateDungeon() |
+| Player placement | ✅ | placePlayerOnStairs() |
+| Depth tracking | ✅ | state.depth updated |
+| Max depth tracking | ✅ | player.maxDepth updated |
 
 ---
 
-## 実装済コア vs UI接続状況
+### 6. Death & Game Over
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| HP <= 0 check | ❌ | Cannot die since no damage is taken |
+| Cause of death record | ❌ | |
+| Tombstone display | ❌ | |
+| Score recording | ❌ | |
+| Game loop termination | ⚠️ | state.dead check exists but is never set |
+
+---
+
+### 7. Victory
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Morgoth spawn (depth 100) | ❌ | |
+| Morgoth kill detection | ❌ | |
+| Victory flag setting | ❌ | |
+| Victory screen | ❌ | |
+
+---
+
+### 8. Save/Load
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| JSON format save | ⚠️ | save.ts implemented |
+| Load & restore | ⚠️ | load.ts implemented |
+| Save from UI | ❌ | No key binding |
+| Load from UI | ❌ | No menu |
+| Auto-save | ❌ | |
+
+---
+
+## Core Implementation vs UI Connection Status
 
 ```
                     Core Engine          Web UI (game-bridge.ts)
                     ───────────          ──────────────────────
-  ゲームループ      game/world.ts        ✅ runGameLoop()使用
-  エネルギー        game/world.ts        ✅ EXTRACT_ENERGY
-  移動              command/movement.ts  ✅ cmdWalk → 自動攻撃対応
-  階段              command/movement.ts  ✅ cmdGoUp/cmdGoDown
-  戦闘              command/combat.ts    ✅ cmdAttack/cmdFire/cmdThrow
-  モンスターAI      monster/move.ts      ✅ processMonsters経由
-  モンスター攻撃    monster/attack.ts    ✅ processMonsters経由
-  HP/MP回復         game/world.ts        ✅ processWorld経由
-  空腹              game/world.ts        ✅ processWorld経由
-  時限効果          player/timed.ts      ✅ processWorld経由
-  アイテム使用      command/item.ts      ✅ 食/飲/読/杖/棒 UI付き
-  装備              object/gear.ts       ✅ 装備/外す/落とす UI付き
-  魔法              command/magic.ts     ✅ 詠唱/習得 UI付き
-  セーブ            save/save.ts         ✅ Ctrl+S → localStorage
-  ロード            save/load.ts         ✅ 起動時に自動検出
-  死亡画面          (新規)               ✅ 墓碑ASCIIアート表示
-  勝利画面          (新規)               ✅ 勝利メッセージ表示
-  エフェクト        effect/handler.ts    ⚠️ 基本のみ（簡略化）
-  投射              project/project.ts   ⚠️ コア実装済・UI未対応
-  店                store/store.ts       ❌ 町マップ未生成
-  初期装備          (birth)              ❌ classのstartItems未ロード
+  Game loop         game/world.ts        ✅ Uses runGameLoop()
+  Energy            game/world.ts        ✅ EXTRACT_ENERGY
+  Movement          command/movement.ts  ✅ cmdWalk → auto-attack support
+  Stairs            command/movement.ts  ✅ cmdGoUp/cmdGoDown
+  Combat            command/combat.ts    ✅ cmdAttack/cmdFire/cmdThrow
+  Monster AI        monster/move.ts      ✅ Via processMonsters
+  Monster attacks   monster/attack.ts    ✅ Via processMonsters
+  HP/MP regen       game/world.ts        ✅ Via processWorld
+  Hunger            game/world.ts        ✅ Via processWorld
+  Timed effects     player/timed.ts      ✅ Via processWorld
+  Item use          command/item.ts      ✅ Eat/quaff/read/zap/activate w/ UI
+  Equipment         object/gear.ts       ✅ Wield/remove/drop w/ UI
+  Magic             command/magic.ts     ✅ Cast/learn w/ UI
+  Save              save/save.ts         ✅ Ctrl+S → localStorage
+  Load              save/load.ts         ✅ Auto-detect on startup
+  Death screen      (new)                ✅ Tombstone ASCII art display
+  Victory screen    (new)                ✅ Victory message display
+  Effects           effect/handler.ts    ⚠️ Basic only (simplified)
+  Projection        project/project.ts   ⚠️ Core implemented, UI not connected
+  Shops             store/store.ts       ❌ Town map not generated
+  Starting equip    (birth)              ❌ Class startItems not loaded
 ```
 
 ---
 
-## 修正履歴
+## Revision History
 
-### Phase A: ゲームループ統合 ✅
-game-bridge.ts の簡易ループを廃止し、core の runGameLoop() を使用。
-CommandInputProvider を実装し、キー入力→GameCommand変換。
-エネルギーシステム、モンスターAI、ワールド処理が動作。
+### Phase A: Game Loop Integration ✅
+Replaced game-bridge.ts simple loop with core's runGameLoop().
+Implemented CommandInputProvider for key input → GameCommand conversion.
+Energy system, monster AI, and world processing now functional.
 
-### Phase B: 戦闘接続 ✅
-Phase Aの統合により自動接続。cmdWalkがモンスター隣接時にcmdAttack呼出。
-processMonsters()がモンスターの攻撃を処理。HP≤0→死亡判定。
+### Phase B: Combat Connection ✅
+Auto-connected through Phase A integration. cmdWalk calls cmdAttack when adjacent to a monster.
+processMonsters() handles monster attacks. HP <= 0 → death check.
 
-### Phase C: アイテム & 装備 ✅
-command/core.ts のディスパッチャーに全アイテムコマンドを接続。
-game-bridge.ts にインベントリ表示(i)、装備表示(e)、
-アイテム選択UI(レター式)を実装。
+### Phase C: Items & Equipment ✅
+Connected all item commands to the dispatcher in command/core.ts.
+Implemented inventory display (i), equipment display (e),
+and item selection UI (letter-based) in game-bridge.ts.
 
-### Phase D: 魔法 & エフェクト ✅
-呪文詠唱UI(m/p)、呪文習得UI(G)を実装。
-呪文リスト表示（名前/レベル/消費SP/失敗率）。
-コアのcastSpell/learnSpellに接続。
+### Phase D: Magic & Effects ✅
+Implemented spellcasting UI (m/p) and spell learning UI (G).
+Spell list display (name/level/SP cost/failure rate).
+Connected to core castSpell/learnSpell.
 
-### Phase E: セーブ/ロード ✅
-Ctrl+S → localStorage保存。
-起動時に保存データ検出 → 「続行/新規」選択画面。
-race/classテンプレート復元対応。
+### Phase E: Save/Load ✅
+Ctrl+S → localStorage save.
+Save data detection on startup → "Continue/New Game" selection screen.
+Race/class template restoration support.
 
-### Phase F: 死亡 & 勝利画面 ✅
-墓碑ASCIIアート（名前/種族/職業/死因/深度/レベル/ターン）。
-勝利画面メッセージ。死亡/勝利時にセーブデータ自動削除。
+### Phase F: Death & Victory Screens ✅
+Tombstone ASCII art (name/race/class/cause of death/depth/level/turns).
+Victory screen message. Auto-delete save data on death/victory.
 
-### Phase G: モンスター生成修正 ✅
-monster.json + monster_base.json をロードし MonsterRace[] にパース。
-populateMonsters() を placeNewMonster() 使用に書き換え、
-実体のある Monster オブジェクト（HP/速度/AI/睡眠状態付き）を生成。
-GameState.monsters / GameState.monsterRaces を追加し、
-階段によるレベル遷移時も新レベルのモンスターを自動生成。
-モンスター表示を種族別の文字/色に対応（race.dChar / race.dAttr使用）。
+### Phase G: Monster Generation Fix ✅
+Loaded monster.json + monster_base.json and parsed into MonsterRace[].
+Rewrote populateMonsters() to use placeNewMonster(),
+generating proper Monster objects (with HP/speed/AI/sleep state).
+Added GameState.monsters / GameState.monsterRaces.
+Auto-generate monsters for new levels on stair-based level transitions.
+Monster display now uses race-specific char/color (race.dChar / race.dAttr).
 
-### Phase H: 戦闘・レベル遷移品質修正 ✅
-- モンスター近接攻撃をmonsterAttackPlayer()（hit/miss判定、ダメージダイス、
-  AC軽減、クリティカル、状態異常）に置き換え。簡略ダメージ計算を廃止。
-- changeLevel()でレベル遷移時に旧モンスターのrace.curNumをデクリメント。
-  UNIQUEモンスターが永久ブロックされるバグを修正。
-- processMonsters()でプレイヤー死亡時にループを即座に中断。
-- drawMap()のモンスター検索をO(n) find()からMap<midx, Monster>のO(1)に変更。
-- 死亡/不在モンスターの描画を赤"m"からテレインフォールスルーに修正。
-- 未使用のgetMonsters()関数を削除。
+### Phase H: Combat & Level Transition Quality Fix ✅
+- Replaced monster melee attacks with monsterAttackPlayer() (hit/miss checks,
+  damage dice, AC reduction, criticals, status effects). Removed simplified damage calc.
+- Decrement old monsters' race.curNum on level transition in changeLevel().
+  Fixed bug where UNIQUE monsters were permanently blocked.
+- Immediately break loop in processMonsters() on player death.
+- Changed drawMap() monster lookup from O(n) find() to O(1) Map<midx, Monster>.
+- Fixed dead/absent monster rendering from red "m" to terrain fallthrough.
+- Removed unused getMonsters() function.
 
 ---
 
-## 残課題（優先度順）
+## Remaining Tasks (by priority)
 
-1. **初期装備付与**: classのstartItemsをロードしてインベントリに追加
-2. **町マップ生成**: 深度0で8ショップ＋自宅を配置
-3. **ショップUI**: store.tsのstoreBuy/storeSellをUI接続
-4. **投射エフェクト可視化**: ビーム/ボルトの軌跡表示
-5. **Morgoth生成**: 深度100でボス配置、撃破→totalWinner設定
-6. **monster-loader拡充**: innate-freq, spells, spell-power, flags-off未パース
-7. **セーブ/ロード**: monsters配列のシリアライズ/デシリアライズ未実装
+1. **Starting equipment**: Load class startItems and add to inventory
+2. **Town map generation**: Place 8 shops + home at depth 0
+3. **Shop UI**: Connect store.ts storeBuy/storeSell to UI
+4. **Projection effect visualization**: Display beam/bolt trajectories
+5. **Morgoth spawn**: Place boss at depth 100, kill → set totalWinner
+6. **monster-loader expansion**: innate-freq, spells, spell-power, flags-off not yet parsed
+7. **Save/Load**: Serialization/deserialization of monsters array not implemented

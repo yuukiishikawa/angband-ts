@@ -1,402 +1,402 @@
-# C版 → TS版 移植差分レポート
+# C Version to TS Version Porting Diff Report
 
-> 3つの独立した検証エージェント (A/B/C) の結果を突合し、全エージェント一致した項目のみ確定とした。
-> 不一致があった場合はソースコードで追加検証済み。
-
----
-
-## 凡例
-
-| ステータス | 意味 |
-|-----------|------|
-| **EQUIVALENT** | C版とTS版で機能的に同等 |
-| **DIFFERENT** | 設計アプローチが異なるが同等の目的 |
-| **SIMPLIFIED** | C版より簡略化されている |
-| **PARTIAL** | 型定義はあるが実行時ロジックが不完全 |
-| **MISSING** | C版に存在しTS版に欠落 |
+> Results from 3 independent verification agents (A/B/C) were cross-checked; only items where all agents agreed are marked as confirmed.
+> Where disagreements occurred, additional verification was performed against the source code.
 
 ---
 
-## 1. プレイヤー構造体
+## Legend
 
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| コアフィールド (race/class/grid/stats/hp/mp/energy/food/timed等) | **EQUIVALENT** | 全35+フィールドが完全一致 |
-| PlayerState (speed/ac/skills/flags等) | **EQUIVALENT** | 全フィールド一致 |
-| PlayerUpkeep (playing/energyUse/running等) | **EQUIVALENT** | コアフィールド一致 |
-| `gear` (インベントリ) | **DIFFERENT** | C: player上のlinked list → TS: 別配列 (`PlayerWithGear`) |
-| `cave` (プレイヤー視界コピー) | **DIFFERENT** | C: player.cave (知識コピー) → TS: GameState.chunk (単一) |
-| `gear_k` (知識装備) | **MISSING** | ルーン鑑定システムの一部 |
-| `obj_k` (オブジェクト知識) | **MISSING** | ルーン鑑定システムの一部 |
-| `opts` (プレイヤーオプション) | **PARTIAL** | 型定義はあるがPlayer構造体に未接続 |
-| upkeep: `health_who`/`monster_race`/`object_kind` | **MISSING** | UI表示ターゲット追跡 (A/B一致、Cは言及なし→確認済MISSING) |
+| Status | Meaning |
+|--------|---------|
+| **EQUIVALENT** | Functionally equivalent between C and TS versions |
+| **DIFFERENT** | Different design approach but same purpose |
+| **SIMPLIFIED** | Simplified compared to C version |
+| **PARTIAL** | Type definitions exist but runtime logic is incomplete |
+| **MISSING** | Exists in C version but absent from TS version |
 
 ---
 
-## 2. モンスター構造体
+## 1. Player Struct
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| Monster コアフィールド (race/midx/grid/hp/energy/mTimed等) | **EQUIVALENT** | 全フィールド一致 |
-| MonsterRace コアフィールド (ridx/name/blows/flags/speed等) | **EQUIVALENT** | 全フィールド一致 |
-| MonsterLore | **EQUIVALENT** | 型定義完全一致 (ただし実行時更新は不完全) |
-| `known_pstate` (SMART AI用プレイヤー知識) | **MISSING** | 3エージェント一致 |
-| `heatmap` (モンスター個別ヒートマップ) | **MISSING** | 3エージェント一致 |
-| `mimicked_obj`/`held_obj` | **DIFFERENT** | C: ポインタ → TS: インデックス |
-| `freq_innate` (先天呪文頻度) | **PARTIAL** | 型あり、常に0 (パース未実装) |
-| `spell_flags` (呪文フラグ) | **PARTIAL** | 型あり、常に空 (パース未実装) |
-| `spell_power` | **PARTIAL** | 型あり、常に0 (パース未実装) |
-| monster_spell (呪文効果チェーン) | **MISSING** | 種族ごとの呪文効果チェーンが未モデル化 |
-
----
-
-## 3. ダンジョン/洞窟構造体
-
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| Chunk コアフィールド | **EQUIVALENT** | name/depth/height/width/squares/feeling等 |
-| Square コアフィールド | **EQUIVALENT** | feat/info/light/mon |
-| FeatureType | **EQUIVALENT** | 全フィールド一致 |
-| noise/scent ヒートマップ | **PARTIAL** | 型定義あり、伝播処理は未実装 |
-| `monster_groups` | **PARTIAL** | MonsterGroup型定義あり、Chunkに未接続 (A: MISSING, B: PARTIAL, C: PARTIAL → 確認後PARTIAL) |
-| `obj` (オブジェクトパイル) | **SIMPLIFIED** | C: linked listポインタ → TS: ObjectId \| null |
-| `trap` (罠) | **SIMPLIFIED** | C: linked list → TS: TrapId \| null (罠効果は未実装) |
+| Item | Status | Details |
+|------|--------|--------|
+| Core fields (race/class/grid/stats/hp/mp/energy/food/timed etc.) | **EQUIVALENT** | All 35+ fields fully match |
+| PlayerState (speed/ac/skills/flags etc.) | **EQUIVALENT** | All fields match |
+| PlayerUpkeep (playing/energyUse/running etc.) | **EQUIVALENT** | Core fields match |
+| `gear` (inventory) | **DIFFERENT** | C: linked list on player -> TS: separate array (`PlayerWithGear`) |
+| `cave` (player's view copy) | **DIFFERENT** | C: player.cave (knowledge copy) -> TS: GameState.chunk (single) |
+| `gear_k` (knowledge equipment) | **MISSING** | Part of the rune identification system |
+| `obj_k` (object knowledge) | **MISSING** | Part of the rune identification system |
+| `opts` (player options) | **PARTIAL** | Type definitions exist but not connected to Player struct |
+| upkeep: `health_who`/`monster_race`/`object_kind` | **MISSING** | UI display target tracking (A/B agreed, C did not mention -> verified MISSING) |
 
 ---
 
-## 4. オブジェクト/アイテムシステム
+## 2. Monster Struct
 
-**合意度: 3/3 エージェント一致 — TS版最大のギャップ領域**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| ObjectType 型定義 | **EQUIVALENT** | 全30+フィールドが完全一致 |
-| ObjectKind 型定義 | **EQUIVALENT** | allocProb/flavor/aware等すべて |
-| Artifact 型定義 | **EQUIVALENT** | ArtifactUpkeepも含む |
-| EgoItem 型定義 | **EQUIVALENT** | flagsOff/minModifiers等 |
-| Brand/Slay/Curse 型定義 | **EQUIVALENT** | 完全 |
-| Effect チェーン | **EQUIVALENT** | linked list構造同等 |
-| **object.txt からのデータ読込** | **MISSING** | 3エージェント一致。ObjectKindが実行時にロードされない |
-| **artifact.txt からのデータ読込** | **MISSING** | 3エージェント一致 |
-| **ego_item.txt からのデータ読込** | **MISSING** | 3エージェント一致 |
-| `obj-knowledge.c` (ルーン鑑定) | **MISSING** | 3エージェント一致 |
-| `obj-randart.c` (ランダムアーティファクト) | **MISSING** | 3エージェント一致 |
-| `obj-ignore.c` (アイテム無視/squelch) | **MISSING** | 3エージェント一致 |
-| `obj-slays.c` (スレイ/ブランドダメージ計算) | **MISSING** | 3エージェント一致 |
-| `obj-info.c` (アイテム詳細表示) | **MISSING** | 3エージェント一致 |
-| `obj-make.c` (アイテム生成) | **PARTIAL** | make.ts存在、apply_magic()簡略化 |
-| `obj-gear.c` (装備管理) | **PARTIAL** | gear.ts存在、基本動作のみ |
-| `obj-desc.c` (名前生成) | **PARTIAL** | desc.ts存在、フレーバー名簡略化 |
+| Item | Status | Details |
+|------|--------|--------|
+| Monster core fields (race/midx/grid/hp/energy/mTimed etc.) | **EQUIVALENT** | All fields match |
+| MonsterRace core fields (ridx/name/blows/flags/speed etc.) | **EQUIVALENT** | All fields match |
+| MonsterLore | **EQUIVALENT** | Type definitions fully match (though runtime updates are incomplete) |
+| `known_pstate` (player knowledge for SMART AI) | **MISSING** | 3 agents unanimous |
+| `heatmap` (per-monster heatmap) | **MISSING** | 3 agents unanimous |
+| `mimicked_obj`/`held_obj` | **DIFFERENT** | C: pointers -> TS: indices |
+| `freq_innate` (innate spell frequency) | **PARTIAL** | Type exists, always 0 (parsing not implemented) |
+| `spell_flags` (spell flags) | **PARTIAL** | Type exists, always empty (parsing not implemented) |
+| `spell_power` | **PARTIAL** | Type exists, always 0 (parsing not implemented) |
+| monster_spell (spell effect chain) | **MISSING** | Per-race spell effect chains not modeled |
 
 ---
 
-## 5. コマンドシステム
+## 3. Dungeon/Cave Struct
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| コマンド種別 (28種) | **EQUIVALENT** | WALK〜ALTER全て対応 |
-| コマンドキュー | **DIFFERENT** | C: ring buffer (cmdq_push/pop) → TS: async/await |
-| コマンド引数 | **DIFFERENT** | C: union → TS: discriminated union |
-| `nrepeats` (コマンドリピート) | **MISSING** | 3エージェント一致 |
-| `background_command` | **MISSING** | 3エージェント一致 |
-| `cmd_context` (GAME/BIRTH/STORE/DEATH) | **SIMPLIFIED** | TS: 暗黙的にゲーム状態で判定 |
-| Birth コマンド群 | **DIFFERENT** | C: コマンドシステム経由 → TS: 別画面 (BirthScreen) |
-| Wizard コマンド | **MISSING** | デバッグモード未実装 |
-
----
-
-## 6. ゲームループ
-
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| Phase 1: プレイヤー処理 | **EQUIVALENT** | await getCommand() → executeCommand() |
-| Phase 2: 高速モンスター先行処理 | **MISSING** | C: process_monsters(player.energy+1) → TS: 全モンスター一括 |
-| Phase 3: ワールド処理ループ | **SIMPLIFIED** | C: while(playing)反復 → TS: シングルパス |
-| `process_player_cleanup()` | **MISSING** | ステータス再計算/update flags |
-| `reset_monsters()` | **MISSING** | MFLAG_HANDLEDクリア |
-| process_world: HP/MP回復 | **EQUIVALENT** | regenerateHP/Mana |
-| process_world: 空腹 | **EQUIVALENT** | processHunger (10ターンごと) |
-| process_world: 時限効果 | **EQUIVALENT** | decreaseTimedEffects |
-| process_world: **モンスター自然生成** | **MISSING** | 3エージェント一致 |
-| process_world: **モンスターHP再生** | **MISSING** | 3エージェント一致 |
-| process_world: **オブジェクトタイムアウト** | **MISSING** | 杖チャージ回復、松明燃料消費等 |
-| process_world: **毒/出血ダメージ** | **MISSING** | A/B一致、Cは言及あり → 確認済MISSING |
+| Item | Status | Details |
+|------|--------|--------|
+| Chunk core fields | **EQUIVALENT** | name/depth/height/width/squares/feeling etc. |
+| Square core fields | **EQUIVALENT** | feat/info/light/mon |
+| FeatureType | **EQUIVALENT** | All fields match |
+| noise/scent heatmaps | **PARTIAL** | Type definitions exist, propagation processing not implemented |
+| `monster_groups` | **PARTIAL** | MonsterGroup type defined, not connected to Chunk (A: MISSING, B: PARTIAL, C: PARTIAL -> verified PARTIAL) |
+| `obj` (object pile) | **SIMPLIFIED** | C: linked list pointers -> TS: ObjectId \| null |
+| `trap` (traps) | **SIMPLIFIED** | C: linked list -> TS: TrapId \| null (trap effects not implemented) |
 
 ---
 
-## 7. モンスターAI
+## 4. Object/Item System
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous — Largest gap area in the TS version**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| 睡眠/覚醒 | **SIMPLIFIED** | C: 聴覚/匂い/視覚で覚醒判定 → TS: カウンタ減算のみ |
-| 混乱→ランダム移動 | **EQUIVALENT** | |
+| Item | Status | Details |
+|------|--------|--------|
+| ObjectType type definitions | **EQUIVALENT** | All 30+ fields fully match |
+| ObjectKind type definitions | **EQUIVALENT** | allocProb/flavor/aware etc., all present |
+| Artifact type definitions | **EQUIVALENT** | Including ArtifactUpkeep |
+| EgoItem type definitions | **EQUIVALENT** | flagsOff/minModifiers etc. |
+| Brand/Slay/Curse type definitions | **EQUIVALENT** | Complete |
+| Effect chain | **EQUIVALENT** | Equivalent linked list structure |
+| **Data loading from object.txt** | **MISSING** | 3 agents unanimous. ObjectKind not loaded at runtime |
+| **Data loading from artifact.txt** | **MISSING** | 3 agents unanimous |
+| **Data loading from ego_item.txt** | **MISSING** | 3 agents unanimous |
+| `obj-knowledge.c` (rune identification) | **MISSING** | 3 agents unanimous |
+| `obj-randart.c` (random artifacts) | **MISSING** | 3 agents unanimous |
+| `obj-ignore.c` (item ignore/squelch) | **MISSING** | 3 agents unanimous |
+| `obj-slays.c` (slay/brand damage calculation) | **MISSING** | 3 agents unanimous |
+| `obj-info.c` (item detail display) | **MISSING** | 3 agents unanimous |
+| `obj-make.c` (item generation) | **PARTIAL** | make.ts exists, apply_magic() simplified |
+| `obj-gear.c` (equipment management) | **PARTIAL** | gear.ts exists, basic operations only |
+| `obj-desc.c` (name generation) | **PARTIAL** | desc.ts exists, flavor names simplified |
+
+---
+
+## 5. Command System
+
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| Command types (28 types) | **EQUIVALENT** | All from WALK to ALTER covered |
+| Command queue | **DIFFERENT** | C: ring buffer (cmdq_push/pop) -> TS: async/await |
+| Command arguments | **DIFFERENT** | C: union -> TS: discriminated union |
+| `nrepeats` (command repeat) | **MISSING** | 3 agents unanimous |
+| `background_command` | **MISSING** | 3 agents unanimous |
+| `cmd_context` (GAME/BIRTH/STORE/DEATH) | **SIMPLIFIED** | TS: implicitly determined by game state |
+| Birth command group | **DIFFERENT** | C: via command system -> TS: separate screen (BirthScreen) |
+| Wizard commands | **MISSING** | Debug mode not implemented |
+
+---
+
+## 6. Game Loop
+
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| Phase 1: Player processing | **EQUIVALENT** | await getCommand() -> executeCommand() |
+| Phase 2: Fast monster pre-processing | **MISSING** | C: process_monsters(player.energy+1) -> TS: all monsters processed at once |
+| Phase 3: World processing loop | **SIMPLIFIED** | C: while(playing) iteration -> TS: single pass |
+| `process_player_cleanup()` | **MISSING** | Status recalculation/update flags |
+| `reset_monsters()` | **MISSING** | MFLAG_HANDLED clear |
+| process_world: HP/MP regeneration | **EQUIVALENT** | regenerateHP/Mana |
+| process_world: Hunger | **EQUIVALENT** | processHunger (every 10 turns) |
+| process_world: Timed effects | **EQUIVALENT** | decreaseTimedEffects |
+| process_world: **Monster natural spawning** | **MISSING** | 3 agents unanimous |
+| process_world: **Monster HP regeneration** | **MISSING** | 3 agents unanimous |
+| process_world: **Object timeout** | **MISSING** | Staff recharge recovery, torch fuel consumption, etc. |
+| process_world: **Poison/bleeding damage** | **MISSING** | A/B agreed, C mentioned -> verified MISSING |
+
+---
+
+## 7. Monster AI
+
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| Sleep/wake | **SIMPLIFIED** | C: wake based on hearing/smell/sight -> TS: counter decrement only |
+| Confusion -> random movement | **EQUIVALENT** | |
 | RAND_25/RAND_50 | **EQUIVALENT** | |
 | NEVER_MOVE/NEVER_BLOW | **EQUIVALENT** | |
-| 恐怖/逃走 | **SIMPLIFIED** | C: HP閾値+SMART判定 → TS: FEAR効果フラグのみ |
-| 経路探索 | **SIMPLIFIED** | C: ヒートマップ+フロー → TS: 貪欲法 (Chebyshev距離) |
-| ドア開放 (OPEN_DOOR) | **PARTIAL** | 移動可能だがドア地形変更なし (B/C一致) |
-| PASS_WALL/KILL_WALL | **PARTIAL** | 移動可能だが壁破壊なし (B/C一致) |
-| **MOVE_BODY/KILL_BODY** | **MISSING** | 3エージェント一致。モンスター間押し/殺し |
-| **地形ダメージ** | **MISSING** | 3エージェント一致。溶岩等 |
-| **モンスターHP再生** | **MISSING** | 3エージェント一致。100ターンごと |
-| **グループAI** | **MISSING** | 3エージェント一致。協調行動 |
-| **召喚** | **MISSING** | 3エージェント一致 |
-| **増殖** (MULTIPLY) | **MISSING** | 3エージェント一致 |
-| 呪文詠唱 | **PARTIAL** | spell.ts存在、AIターンループ未接続 |
+| Fear/flee | **SIMPLIFIED** | C: HP threshold + SMART evaluation -> TS: FEAR effect flag only |
+| Pathfinding | **SIMPLIFIED** | C: heatmap + flow -> TS: greedy (Chebyshev distance) |
+| Door opening (OPEN_DOOR) | **PARTIAL** | Can move through but no door terrain change (B/C agreed) |
+| PASS_WALL/KILL_WALL | **PARTIAL** | Can move through but no wall destruction (B/C agreed) |
+| **MOVE_BODY/KILL_BODY** | **MISSING** | 3 agents unanimous. Monster push/kill between monsters |
+| **Terrain damage** | **MISSING** | 3 agents unanimous. Lava etc. |
+| **Monster HP regeneration** | **MISSING** | 3 agents unanimous. Every 100 turns |
+| **Group AI** | **MISSING** | 3 agents unanimous. Coordinated behavior |
+| **Summoning** | **MISSING** | 3 agents unanimous |
+| **Multiplication** (MULTIPLY) | **MISSING** | 3 agents unanimous |
+| Spellcasting | **PARTIAL** | spell.ts exists, not connected to AI turn loop |
 
 ---
 
-## 8. 戦闘システム
+## 8. Combat System
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| プレイヤー命中判定 | **EQUIVALENT** | chanceOfMeleeHit() |
-| プレイヤーダメージ計算 | **SIMPLIFIED** | 武器ダイス+toD、スレイ/ブランド未適用 |
-| プレイヤークリティカル | **EQUIVALENT** | |
-| モンスター近接攻撃 | **EQUIVALENT** | 完全なblow解決 (hit/miss/ダメージ/AC軽減/クリティカル) |
-| モンスターblow効果 | **PARTIAL** | 基本効果 (毒/混乱/恐怖/麻痺/ステータス吸収) あり。不足: DRAIN_CHARGES/EAT_GOLD/EAT_ITEM/EAT_FOOD/EAT_LIGHT/SHATTER/経験値吸収 |
-| 自動攻撃 (移動先にモンスター) | **EQUIVALENT** | |
-| **スレイ/ブランドダメージ** | **MISSING** | 3エージェント一致。型定義あり、戦闘で未適用 |
-| **射撃 (FIRE)** | **PARTIAL** | 基本構造あり、弾薬消費/倍率なし |
-| **投擲 (THROW)** | **PARTIAL** | スタブのみ |
-| **盾バッシュ** | **MISSING** | 3エージェント一致 |
-| **モンスター死亡時ドロップ** | **MISSING** | A/B一致。モンスター撃破時にアイテムが落ちない |
-
----
-
-## 9. 魔法/呪文システム
-
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| ClassSpell/ClassBook/ClassMagic型 | **EQUIVALENT** | |
-| 呪文習得 (learnSpell) | **EQUIVALENT** | |
-| 呪文詠唱 (cmdCast) | **EQUIVALENT** | |
-| 失敗率計算 | **EQUIVALENT** | |
-| エフェクトチェーン実行 | **EQUIVALENT** | executeEffectChain() |
-| EffectType列挙 (~130型) | **EQUIVALENT** | 全型定義 |
-| **実装済エフェクトハンドラ** | **PARTIAL** | ~25/130実装。動作: HEAL_HP, NOURISH, CURE, TIMED_INC/DEC/SET, RESTORE_STAT, DRAIN_STAT, GAIN_STAT, BOLT, BEAM, BALL, BREATH, RESTORE_MANA/EXP, LIGHT_AREA, MAP_AREA。未実装: TELEPORT, SUMMON, DETECT_*, ENCHANT, RECHARGE, IDENTIFY, EARTHQUAKE, DESTRUCTION等 |
+| Item | Status | Details |
+|------|--------|--------|
+| Player hit calculation | **EQUIVALENT** | chanceOfMeleeHit() |
+| Player damage calculation | **SIMPLIFIED** | Weapon dice + toD, slays/brands not applied |
+| Player critical hits | **EQUIVALENT** | |
+| Monster melee attacks | **EQUIVALENT** | Complete blow resolution (hit/miss/damage/AC reduction/critical) |
+| Monster blow effects | **PARTIAL** | Basic effects (poison/confusion/fear/paralysis/stat drain) present. Missing: DRAIN_CHARGES/EAT_GOLD/EAT_ITEM/EAT_FOOD/EAT_LIGHT/SHATTER/experience drain |
+| Auto-attack (monster at move destination) | **EQUIVALENT** | |
+| **Slay/brand damage** | **MISSING** | 3 agents unanimous. Type definitions exist but not applied in combat |
+| **Ranged attacks (FIRE)** | **PARTIAL** | Basic structure exists, no ammo consumption/multiplier |
+| **Throwing (THROW)** | **PARTIAL** | Stub only |
+| **Shield bash** | **MISSING** | 3 agents unanimous |
+| **Monster death drops** | **MISSING** | A/B agreed. No items dropped when monsters are killed |
 
 ---
 
-## 10. ダンジョン生成
+## 9. Magic/Spell System
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| 基本生成 (壁充填→部屋→トンネル→階段) | **EQUIVALENT** | |
-| 部屋タイプ | **SIMPLIFIED** | C: 15+種類 → TS: 5種類 (simple/overlapping/cross/circular/large) |
-| モンスター配置 | **EQUIVALENT** | 深度ベース選択 |
-| **生成プロファイル** | **MISSING** | 3エージェント一致。C: 15+プロファイル → TS: 1つ |
-| **Vaultテンプレート** | **MISSING** | 3エージェント一致 |
-| **Pit/Nestルーム** | **MISSING** | 3エージェント一致 |
-| **町マップ生成** | **MISSING** | 3エージェント一致。深度0でショップ配置なし |
-| **永続レベル** | **MISSING** | 3エージェント一致 |
-| **レベル感覚計算** | **PARTIAL** | フィールドあり、算出なし |
-| **生成リトライ** | **MISSING** | C: 100回まで → TS: 1回 |
-| オブジェクト配置 | **PARTIAL** | populateObjects()あり、ObjectKind未ロード |
-| 罠配置 | **PARTIAL** | placeTraps()あり、罠効果なし |
+| Item | Status | Details |
+|------|--------|--------|
+| ClassSpell/ClassBook/ClassMagic types | **EQUIVALENT** | |
+| Spell learning (learnSpell) | **EQUIVALENT** | |
+| Spellcasting (cmdCast) | **EQUIVALENT** | |
+| Failure rate calculation | **EQUIVALENT** | |
+| Effect chain execution | **EQUIVALENT** | executeEffectChain() |
+| EffectType enumeration (~130 types) | **EQUIVALENT** | All type definitions |
+| **Implemented effect handlers** | **PARTIAL** | ~25/130 implemented. Working: HEAL_HP, NOURISH, CURE, TIMED_INC/DEC/SET, RESTORE_STAT, DRAIN_STAT, GAIN_STAT, BOLT, BEAM, BALL, BREATH, RESTORE_MANA/EXP, LIGHT_AREA, MAP_AREA. Not implemented: TELEPORT, SUMMON, DETECT_*, ENCHANT, RECHARGE, IDENTIFY, EARTHQUAKE, DESTRUCTION, etc. |
 
 ---
 
-## 11. FOV/LOS (視界)
+## 10. Dungeon Generation
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| LOS算法 (Joseph Hall) | **EQUIVALENT** | 忠実な移植 |
-| FOV算法 | **DIFFERENT** | C: ブルートフォース → TS: 再帰シャドウキャスティング (より効率的) |
-| VIEW/SEEN/WASSEEN フラグ | **EQUIVALENT** | |
-| 壁可視性修正 | **EQUIVALENT** | fixWallVisibility() |
+| Item | Status | Details |
+|------|--------|--------|
+| Basic generation (wall fill -> rooms -> tunnels -> stairs) | **EQUIVALENT** | |
+| Room types | **SIMPLIFIED** | C: 15+ types -> TS: 5 types (simple/overlapping/cross/circular/large) |
+| Monster placement | **EQUIVALENT** | Depth-based selection |
+| **Generation profiles** | **MISSING** | 3 agents unanimous. C: 15+ profiles -> TS: 1 |
+| **Vault templates** | **MISSING** | 3 agents unanimous |
+| **Pit/Nest rooms** | **MISSING** | 3 agents unanimous |
+| **Town map generation** | **MISSING** | 3 agents unanimous. No shop placement at depth 0 |
+| **Persistent levels** | **MISSING** | 3 agents unanimous |
+| **Level feeling calculation** | **PARTIAL** | Field exists, no computation |
+| **Generation retry** | **MISSING** | C: up to 100 retries -> TS: 1 attempt |
+| Object placement | **PARTIAL** | populateObjects() exists, ObjectKind not loaded |
+| Trap placement | **PARTIAL** | placeTraps() exists, no trap effects |
+
+---
+
+## 11. FOV/LOS (Field of View / Line of Sight)
+
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| LOS algorithm (Joseph Hall) | **EQUIVALENT** | Faithful port |
+| FOV algorithm | **DIFFERENT** | C: brute force -> TS: recursive shadowcasting (more efficient) |
+| VIEW/SEEN/WASSEEN flags | **EQUIVALENT** | |
+| Wall visibility fix | **EQUIVALENT** | fixWallVisibility() |
 | CLOSE_PLAYER | **EQUIVALENT** | |
-| **盲目処理** | **MISSING** | 3エージェント一致 |
-| **赤外線視覚** | **MISSING** | 3エージェント一致 |
-| **GLOW伝播** | **PARTIAL** | フラグあり、光源からの伝播は基本的 |
-| **モンスター発光** | **MISSING** | B/C一致 |
+| **Blindness handling** | **MISSING** | 3 agents unanimous |
+| **Infravision** | **MISSING** | 3 agents unanimous |
+| **GLOW propagation** | **PARTIAL** | Flag exists, light source propagation is basic |
+| **Monster illumination** | **MISSING** | B/C agreed |
 
 ---
 
-## 12. ショップ
+## 12. Shops
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| 店タイプ (9種) | **EQUIVALENT** | |
-| 売買ロジック | **EQUIVALENT** | storeBuy/storeSell |
-| 自宅 | **EQUIVALENT** | homeStore/homeRetrieve |
-| 在庫管理 | **EQUIVALENT** | storeMaintenance |
-| 店主 | **SIMPLIFIED** | C: 複数ランダム → TS: 固定1人 |
-| **店UI** | **MISSING** | 3エージェント一致。コアロジックあり、UI未接続 |
-| **町マップ上の店配置** | **MISSING** | 3エージェント一致 |
-
----
-
-## 13. セーブ/ロード
-
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| プレイヤーデータ | **EQUIVALENT** | |
-| ダンジョンデータ | **EQUIVALENT** | |
-| モンスターデータ | **EQUIVALENT** | |
-| RNG状態 | **EQUIVALENT** | |
-| 保存形式 | **DIFFERENT** | C: バイナリ → TS: JSON + localStorage |
-| **パニックセーブ** | **MISSING** | 3エージェント一致 |
-| **バージョン移行** | **MISSING** | 3エージェント一致 |
-| **キャラクターダンプ** | **MISSING** | 3エージェント一致 |
-| **ハイスコア** | **MISSING** | 3エージェント一致 |
-| メッセージ保存 | **DIFFERENT** | C: 保存なし → TS: 直近200メッセージ保存 (TS版が優位) |
+| Item | Status | Details |
+|------|--------|--------|
+| Shop types (9 types) | **EQUIVALENT** | |
+| Buy/sell logic | **EQUIVALENT** | storeBuy/storeSell |
+| Home | **EQUIVALENT** | homeStore/homeRetrieve |
+| Inventory management | **EQUIVALENT** | storeMaintenance |
+| Shopkeepers | **SIMPLIFIED** | C: multiple random -> TS: 1 fixed |
+| **Shop UI** | **MISSING** | 3 agents unanimous. Core logic exists, UI not connected |
+| **Shop placement on town map** | **MISSING** | 3 agents unanimous |
 
 ---
 
-## 14. イベントシステム
+## 13. Save/Load
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| イベント型 (65種) | **EQUIVALENT** | 完全一致 |
-| ハンドラ登録/削除 | **EQUIVALENT** | on/off |
-| ディスパッチ | **EQUIVALENT** | emit |
-| once ハンドラ | **TS版のみ** | C版にない機能 |
-| ビジュアルエフェクトイベント | **PARTIAL** | 型定義あり、UIハンドラなし |
-
----
-
-## 15. UI抽象化
-
-**合意度: 3/3 エージェント一致**
-
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| ターミナル抽象化 | **SIMPLIFIED** | C: マルチウィンドウ → TS: シングル80x24 |
-| プラットフォーム | **DIFFERENT** | C: Curses/SDL2/X11/Win/NDS → TS: Canvas |
-| 色システム | **EQUIVALENT** | |
-| ダーティリージョン描画 | **EQUIVALENT** | |
-| **マルチウィンドウ** | **MISSING** | 3エージェント一致。モンスター一覧/メッセージ履歴等 |
-| **キーマップモード** | **MISSING** | 3エージェント一致。Original/Roguelike切替 |
-| **メニューフレームワーク** | **MISSING** | 3エージェント一致。汎用メニューシステム |
-| **ターゲティングモード** | **MISSING** | 3エージェント一致。カーソル移動式ターゲット選択 |
-| **マウスサポート** | **MISSING** | |
-| **サウンド** | **MISSING** | |
+| Item | Status | Details |
+|------|--------|--------|
+| Player data | **EQUIVALENT** | |
+| Dungeon data | **EQUIVALENT** | |
+| Monster data | **EQUIVALENT** | |
+| RNG state | **EQUIVALENT** | |
+| Save format | **DIFFERENT** | C: binary -> TS: JSON + localStorage |
+| **Panic save** | **MISSING** | 3 agents unanimous |
+| **Version migration** | **MISSING** | 3 agents unanimous |
+| **Character dump** | **MISSING** | 3 agents unanimous |
+| **High scores** | **MISSING** | 3 agents unanimous |
+| Message saving | **DIFFERENT** | C: not saved -> TS: saves last 200 messages (TS version superior) |
 
 ---
 
-## 16. データ読込
+## 14. Event System
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| パーサーシステム | **EQUIVALENT** | parser.ts は C版の忠実な移植 |
-| モンスターデータ | **EQUIVALENT** | monster.json + monster_base.json |
-| 種族/職業データ | **EQUIVALENT** | p_race.json, class.json |
-| 地形データ | **SIMPLIFIED** | C: terrain.txt → TS: ハードコード (buildDefaultFeatureInfo) |
-| **object.txt** | **MISSING** | 3エージェント一致 |
-| **artifact.txt** | **MISSING** | 3エージェント一致 |
-| **ego_item.txt** | **MISSING** | 3エージェント一致 |
-| **vault.txt** | **MISSING** | 3エージェント一致 |
-| **trap.txt** | **MISSING** | 3エージェント一致 |
-| **spell.txt** (呪文効果) | **SIMPLIFIED** | class.jsonに埋め込み |
-| データファイル数 | **SIMPLIFIED** | C: 50+ファイル → TS: 4 JSONファイル |
+| Item | Status | Details |
+|------|--------|--------|
+| Event types (65 types) | **EQUIVALENT** | Fully match |
+| Handler register/unregister | **EQUIVALENT** | on/off |
+| Dispatch | **EQUIVALENT** | emit |
+| once handler | **TS only** | Feature not present in C version |
+| Visual effect events | **PARTIAL** | Type definitions exist, no UI handler |
 
 ---
 
-## 17. 投射/エフェクトシステム
+## 15. UI Abstraction
 
-**合意度: 3/3 エージェント一致**
+**Agreement: 3/3 agents unanimous**
 
-| 項目 | ステータス | 詳細 |
-|------|-----------|------|
-| 投射経路計算 | **EQUIVALENT** | calculateProjectionPath() |
-| Bolt/Beam/Ball/Arc | **EQUIVALENT** | 全4種類の範囲計算 |
-| ProjectFlag (14フラグ) | **EQUIVALENT** | |
-| ダメージ減衰 | **EQUIVALENT** | damage/(dist+1) |
-| project_feat (地形変化) | **PARTIAL** | 基本のみ |
-| project_mon (モンスターダメージ) | **PARTIAL** | 基本ダメージ+耐性、状態異常簡略 |
-| project_player (プレイヤーダメージ) | **PARTIAL** | 基本ダメージ+一部状態異常 |
-| **project_obj (オブジェクト破壊)** | **MISSING** | 3エージェント一致。火で巻物燃える等 |
-| **ビジュアルエフェクト** | **MISSING** | 3エージェント一致。ボルト/ボール軌跡アニメ |
+| Item | Status | Details |
+|------|--------|--------|
+| Terminal abstraction | **SIMPLIFIED** | C: multi-window -> TS: single 80x24 |
+| Platform | **DIFFERENT** | C: Curses/SDL2/X11/Win/NDS -> TS: Canvas |
+| Color system | **EQUIVALENT** | |
+| Dirty region rendering | **EQUIVALENT** | |
+| **Multi-window** | **MISSING** | 3 agents unanimous. Monster list/message history etc. |
+| **Keymap modes** | **MISSING** | 3 agents unanimous. Original/Roguelike toggle |
+| **Menu framework** | **MISSING** | 3 agents unanimous. Generic menu system |
+| **Targeting mode** | **MISSING** | 3 agents unanimous. Cursor-based target selection |
+| **Mouse support** | **MISSING** | |
+| **Sound** | **MISSING** | |
 
 ---
 
-## 統計サマリー
+## 16. Data Loading
 
-| カテゴリ | EQUIVALENT | DIFFERENT | SIMPLIFIED | PARTIAL | MISSING |
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| Parser system | **EQUIVALENT** | parser.ts is a faithful port of the C version |
+| Monster data | **EQUIVALENT** | monster.json + monster_base.json |
+| Race/class data | **EQUIVALENT** | p_race.json, class.json |
+| Terrain data | **SIMPLIFIED** | C: terrain.txt -> TS: hardcoded (buildDefaultFeatureInfo) |
+| **object.txt** | **MISSING** | 3 agents unanimous |
+| **artifact.txt** | **MISSING** | 3 agents unanimous |
+| **ego_item.txt** | **MISSING** | 3 agents unanimous |
+| **vault.txt** | **MISSING** | 3 agents unanimous |
+| **trap.txt** | **MISSING** | 3 agents unanimous |
+| **spell.txt** (spell effects) | **SIMPLIFIED** | Embedded in class.json |
+| Number of data files | **SIMPLIFIED** | C: 50+ files -> TS: 4 JSON files |
+
+---
+
+## 17. Projection/Effect System
+
+**Agreement: 3/3 agents unanimous**
+
+| Item | Status | Details |
+|------|--------|--------|
+| Projection path calculation | **EQUIVALENT** | calculateProjectionPath() |
+| Bolt/Beam/Ball/Arc | **EQUIVALENT** | All 4 area calculation types |
+| ProjectFlag (14 flags) | **EQUIVALENT** | |
+| Damage falloff | **EQUIVALENT** | damage/(dist+1) |
+| project_feat (terrain changes) | **PARTIAL** | Basic only |
+| project_mon (monster damage) | **PARTIAL** | Basic damage + resistances, status effects simplified |
+| project_player (player damage) | **PARTIAL** | Basic damage + some status effects |
+| **project_obj (object destruction)** | **MISSING** | 3 agents unanimous. E.g., scrolls burning from fire |
+| **Visual effects** | **MISSING** | 3 agents unanimous. Bolt/ball trajectory animation |
+
+---
+
+## Statistics Summary
+
+| Category | EQUIVALENT | DIFFERENT | SIMPLIFIED | PARTIAL | MISSING |
 |----------|-----------|-----------|------------|---------|---------|
-| 1. プレイヤー | 35 | 2 | 0 | 1 | 4 |
-| 2. モンスター | 24 | 2 | 0 | 4 | 3 |
-| 3. ダンジョン | 17 | 0 | 2 | 3 | 1 |
-| 4. オブジェクト | 17 | 0 | 0 | 5 | 8 |
-| 5. コマンド | 21 | 3 | 1 | 0 | 3 |
-| 6. ゲームループ | 5 | 0 | 2 | 0 | 5 |
-| 7. モンスターAI | 4 | 0 | 3 | 3 | 7 |
-| 8. 戦闘 | 4 | 0 | 1 | 3 | 4 |
-| 9. 魔法/呪文 | 6 | 0 | 0 | 1 | 0 |
-| 10. ダンジョン生成 | 3 | 0 | 1 | 3 | 5 |
+| 1. Player | 35 | 2 | 0 | 1 | 4 |
+| 2. Monster | 24 | 2 | 0 | 4 | 3 |
+| 3. Dungeon | 17 | 0 | 2 | 3 | 1 |
+| 4. Object | 17 | 0 | 0 | 5 | 8 |
+| 5. Command | 21 | 3 | 1 | 0 | 3 |
+| 6. Game Loop | 5 | 0 | 2 | 0 | 5 |
+| 7. Monster AI | 4 | 0 | 3 | 3 | 7 |
+| 8. Combat | 4 | 0 | 1 | 3 | 4 |
+| 9. Magic/Spells | 6 | 0 | 0 | 1 | 0 |
+| 10. Dungeon Generation | 3 | 0 | 1 | 3 | 5 |
 | 11. FOV/LOS | 5 | 1 | 0 | 1 | 3 |
-| 12. ショップ | 5 | 0 | 1 | 0 | 2 |
-| 13. セーブ/ロード | 4 | 3 | 0 | 0 | 4 |
-| 14. イベント | 5 | 0 | 0 | 1 | 0 |
+| 12. Shops | 5 | 0 | 1 | 0 | 2 |
+| 13. Save/Load | 4 | 3 | 0 | 0 | 4 |
+| 14. Events | 5 | 0 | 0 | 1 | 0 |
 | 15. UI | 2 | 2 | 1 | 0 | 5 |
-| 16. データ読込 | 3 | 0 | 3 | 0 | 5 |
-| 17. 投射/エフェクト | 5 | 0 | 0 | 3 | 2 |
-| **合計** | **165** | **13** | **15** | **28** | **61** |
+| 16. Data Loading | 3 | 0 | 3 | 0 | 5 |
+| 17. Projection/Effects | 5 | 0 | 0 | 3 | 2 |
+| **Total** | **165** | **13** | **15** | **28** | **61** |
 
 ---
 
-## 最重要ギャップ TOP 10 (全エージェント一致)
+## Top 10 Most Critical Gaps (All Agents Unanimous)
 
-| 順位 | ギャップ | 影響度 | 備考 |
-|------|---------|--------|------|
-| **1** | オブジェクトデータ未読込 (object.txt/artifact.txt/ego_item.txt) | **致命的** | アイテムがゲーム世界に登場しない |
-| **2** | 町マップ生成 + ショップUI | **致命的** | 深度0で買い物不可 |
-| **3** | モンスター呪文のAI未接続 | **高** | freq_innate/spell_flags/spellPowerがパースされず、呪文詠唱しない |
-| **4** | スレイ/ブランドダメージ未適用 | **高** | 武器特殊効果が機能しない |
-| **5** | 投射ビジュアルエフェクト | **高** | ボルト/ビーム/ボールの軌跡が見えない |
-| **6** | Vault/Pit/Nestルーム + ダンジョンプロファイル | **中** | ダンジョンの多様性が低い |
-| **7** | モンスター自然生成 + HP再生 + 地形ダメージ | **中** | ワールド処理の欠落 |
-| **8** | ルーン鑑定システム (obj-knowledge) | **中** | アイテム知識の進行がない |
-| **9** | ターゲティングモード | **中** | 遠距離攻撃/呪文の照準不可 |
-| **10** | コマンドリピート (nrepeats) | **低** | QoL機能の欠落 |
-
----
-
-## 設計上の主要な差異 (意図的な変更)
-
-| 観点 | C版 | TS版 | 評価 |
-|------|-----|------|------|
-| 状態管理 | グローバル変数 | GameStateオブジェクト | TS版が優位 (テスト容易) |
-| コマンド入力 | ring buffer + 関数ポインタ | async/await + switch | TS版が優位 (型安全) |
-| イベント | Cコールバック | EventBus (once/clearType追加) | TS版が優位 (機能追加) |
-| FOV算法 | ブルートフォース | 再帰シャドウキャスティング | TS版が優位 (効率的) |
-| セーブ形式 | バイナリ | JSON + localStorage | TS版が優位 (デバッグ容易) |
-| メモリ管理 | 手動malloc/free | GC自動管理 | TS版が優位 |
-| データ形式 | .txtパーサー | JSON + .txtパーサー両対応 | 同等 |
+| Rank | Gap | Impact | Notes |
+|------|-----|--------|-------|
+| **1** | Object data not loaded (object.txt/artifact.txt/ego_item.txt) | **Critical** | Items do not appear in the game world |
+| **2** | Town map generation + Shop UI | **Critical** | Cannot shop at depth 0 |
+| **3** | Monster spell AI not connected | **High** | freq_innate/spell_flags/spellPower not parsed, monsters do not cast spells |
+| **4** | Slay/brand damage not applied | **High** | Weapon special effects do not function |
+| **5** | Projection visual effects | **High** | Bolt/beam/ball trajectories not visible |
+| **6** | Vault/Pit/Nest rooms + dungeon profiles | **Medium** | Low dungeon variety |
+| **7** | Monster natural spawning + HP regen + terrain damage | **Medium** | World processing gaps |
+| **8** | Rune identification system (obj-knowledge) | **Medium** | No item knowledge progression |
+| **9** | Targeting mode | **Medium** | Cannot aim ranged attacks/spells |
+| **10** | Command repeat (nrepeats) | **Low** | Quality-of-life feature gap |
 
 ---
 
-## 結論
+## Major Design Differences (Intentional Changes)
 
-**型定義の移植は非常に高品質** — C版の全主要構造体にTS版の完全なinterface対応がある。
+| Aspect | C Version | TS Version | Assessment |
+|--------|-----------|------------|------------|
+| State management | Global variables | GameState object | TS version superior (easier to test) |
+| Command input | Ring buffer + function pointers | async/await + switch | TS version superior (type-safe) |
+| Events | C callbacks | EventBus (once/clearType added) | TS version superior (added features) |
+| FOV algorithm | Brute force | Recursive shadowcasting | TS version superior (more efficient) |
+| Save format | Binary | JSON + localStorage | TS version superior (easier to debug) |
+| Memory management | Manual malloc/free | GC automatic management | TS version superior |
+| Data format | .txt parser | JSON + .txt parser dual support | Equivalent |
 
-**ギャップの本質は「データ読込」と「実行時ロジック」** — 型は定義されているが、データファイルがロードされないためオブジェクト/アーティファクト/エゴアイテム/罠が実行時に存在しない。この1点を解決すれば、多くのPARTIAL項目が自動的にEQUIVALENTに昇格する。
+---
+
+## Conclusion
+
+**Type definition porting is of very high quality** — all major C structs have complete TS interface counterparts.
+
+**The essential gap lies in "data loading" and "runtime logic"** — types are defined, but because data files are not loaded, objects/artifacts/ego items/traps do not exist at runtime. Resolving this single issue would automatically promote many PARTIAL items to EQUIVALENT.

@@ -1,28 +1,28 @@
-# Angband TypeScript移植計画（7ステップ）
+# Angband TypeScript Porting Plan (7 Steps)
 
-本家C版Angband（205,536行 / 235ファイル）をTypeScriptに移植するマスタープラン。
+Master plan for porting the original C Angband (205,536 lines / 235 files) to TypeScript.
 
-## 現状: 全7ステップ完了 (2026-02-27)
+## Current Status: All 7 Steps Complete (2026-02-27)
 
-**全ステップ完了。** 28,583ソース行 + 23,380テスト行 = 51,963行。
-1,441テスト全通過。typecheck 0エラー。Web UIでプレイ可能。
+**All steps complete.** 28,583 source lines + 23,380 test lines = 51,963 lines.
+All 1,441 tests passing. typecheck 0 errors. Playable via Web UI.
 
 ---
 
-## Step 1: 基盤完成 — 型定義 + データ構造
+## Step 1: Foundation Complete — Type Definitions + Data Structures
 
-**目的**: ゲーム全体で使う型（Player, Monster, Object, Cave）を定義し、
-上位モジュールが依存する土台を固める。
+**Goal**: Define the types used throughout the game (Player, Monster, Object, Cave)
+and establish the foundation that higher-level modules depend on.
 
-**対象ファイル（C）**:
-- `player.h` — プレイヤー構造体
-- `monster.h` — モンスター構造体
-- `object.h` — アイテム/装備構造体
-- `cave.h` — ダンジョン構造体（chunk, square）
-- `option.h` — ゲームオプション
-- `z-type.h` 追加分 — 型ユーティリティ補完
+**Source Files (C)**:
+- `player.h` — Player struct
+- `monster.h` — Monster struct
+- `object.h` — Item/equipment struct
+- `cave.h` — Dungeon struct (chunk, square)
+- `option.h` — Game options
+- `z-type.h` additions — Type utility supplements
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/core/src/types/
   player.ts       — Player, PlayerRace, PlayerClass, PlayerState
@@ -33,310 +33,310 @@ packages/@angband/core/src/types/
   index.ts        — barrel export
 ```
 
-**判断基準**:
-- z-layer不足分（z-form, z-util, z-virt, z-file, z-textblock）はTSでは不要。
+**Design Decisions**:
+- Missing z-layer components (z-form, z-util, z-virt, z-file, z-textblock) are unnecessary in TS.
   - z-form → template literal / string interpolation
-  - z-util → JS標準ライブラリで代替
-  - z-virt → GC言語なので不要
-  - z-file → Node fs / Web File API（レイヤー分離で後回し）
-  - z-textblock → Step 7（UI）で実装
-- C構造体の「ポインタ」→ TS「ID参照 or オブジェクト参照」に変換
+  - z-util → Replaced by JS standard library
+  - z-virt → Unnecessary in a GC language
+  - z-file → Node fs / Web File API (deferred via layer separation)
+  - z-textblock → Implemented in Step 7 (UI)
+- C struct "pointers" → TS "ID references or object references"
 
-**推定規模**: ~2,000行（型定義 + テスト）
+**Estimated Size**: ~2,000 lines (type definitions + tests)
 
 ---
 
-## Step 2: データパイプライン — Parser + Gamedata Loader
+## Step 2: Data Pipeline — Parser + Gamedata Loader
 
-**目的**: 46個のゲームデータファイル（monster.txt, object.txt等 計2.3MB）を
-パースしてTypeScriptオブジェクトに変換する。
+**Goal**: Parse the 46 game data files (monster.txt, object.txt, etc. totaling 2.3MB)
+and convert them into TypeScript objects.
 
-**対象ファイル（C）**:
-- `parser.c` / `parser.h` (1,200行) — 汎用テキストパーサー
-- `datafile.c` / `datafile.h` (500行) — ファイル読み込み
-- `init.c` (4,558行) — 初期化・データロード統合
+**Source Files (C)**:
+- `parser.c` / `parser.h` (1,200 lines) — Generic text parser
+- `datafile.c` / `datafile.h` (500 lines) — File reading
+- `init.c` (4,558 lines) — Initialization and data loading integration
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/core/src/data/
-  parser.ts        — Angbandテキストフォーマットパーサー
+  parser.ts        — Angband text format parser
   parser.test.ts
-  loader.ts        — データファイルローダー
+  loader.ts        — Data file loader
   loader.test.ts
-  registry.ts      — 全データの中央レジストリ
+  registry.ts      — Central registry for all data
   index.ts
 
 tools/data-converter/
-  convert.ts       — .txt → .json 変換ツール（ビルド時実行）
-  schemas/         — JSONスキーマ定義
+  convert.ts       — .txt → .json conversion tool (run at build time)
+  schemas/         — JSON schema definitions
 
 packages/@angband/core/gamedata/
-  *.json           — 変換済みゲームデータ
+  *.json           — Converted game data
 ```
 
-**方針**:
-- 2段構成: (A) ビルド時にtxt→JSON変換、(B) ランタイムでJSONロード
-- ランタイムパーサーも実装（modding対応）
-- `init.c`の初期化順序を忠実に再現
+**Approach**:
+- Two-stage design: (A) Convert txt → JSON at build time, (B) Load JSON at runtime
+- Runtime parser also implemented (for modding support)
+- Faithfully reproduce the initialization order from `init.c`
 
-**主要データファイル（優先度順）**:
+**Key Data Files (by priority)**:
 
-| ファイル | サイズ | 内容 |
-|---------|--------|------|
-| monster.txt | 287KB | モンスター420種 |
-| room_template.txt | 161KB | 部屋テンプレート100+ |
-| vault.txt | 101KB | ヴォールト80+ |
-| object.txt | 84KB | アイテム400種 |
-| artifact.txt | 61KB | アーティファクト100+ |
-| class.txt | 48KB | プレイヤークラス10種 |
-| monster_spell.txt | 33KB | モンスター魔法150+ |
-| ego_item.txt | 24KB | エゴアイテム150+ |
-| その他30+ファイル | — | 種族、店、地形、効果等 |
+| File | Size | Contents |
+|------|------|----------|
+| monster.txt | 287KB | 420 monster types |
+| room_template.txt | 161KB | 100+ room templates |
+| vault.txt | 101KB | 80+ vaults |
+| object.txt | 84KB | 400 item types |
+| artifact.txt | 61KB | 100+ artifacts |
+| class.txt | 48KB | 10 player classes |
+| monster_spell.txt | 33KB | 150+ monster spells |
+| ego_item.txt | 24KB | 150+ ego items |
+| 30+ other files | — | Races, shops, terrain, effects, etc. |
 
-**推定規模**: ~3,000行（パーサー + 変換ツール + テスト）
+**Estimated Size**: ~3,000 lines (parser + conversion tool + tests)
 
 ---
 
-## Step 3: 洞窟 & マップシステム — FOV, 移動, 地形
+## Step 3: Cave & Map System — FOV, Movement, Terrain
 
-**目的**: ダンジョンの空間表現、視界計算、経路探索を実装。
-ローグライクの根幹。
+**Goal**: Implement dungeon spatial representation, field of view calculation, and pathfinding.
+The core of a roguelike.
 
-**対象ファイル（C）**:
-- `cave.c` (1,500行) — マップ操作
-- `cave-map.c` (1,000行) — 視界・照明計算
-- `cave-square.c` (1,000行) — マス目操作
-- `cave-view.c` (800行) — FOV（Field of View）
+**Source Files (C)**:
+- `cave.c` (1,500 lines) — Map operations
+- `cave-map.c` (1,000 lines) — Vision and lighting calculations
+- `cave-square.c` (1,000 lines) — Tile operations
+- `cave-view.c` (800 lines) — FOV (Field of View)
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/core/src/cave/
-  chunk.ts         — Chunk（ダンジョン階層）管理
-  square.ts        — Square操作（地形判定、フラグ操作）
-  map.ts           — マップ更新・照明
-  view.ts          — FOV計算（shadowcasting）
-  pathfind.ts      — A*経路探索
-  cave.test.ts     — 統合テスト
+  chunk.ts         — Chunk (dungeon level) management
+  square.ts        — Square operations (terrain checks, flag operations)
+  map.ts           — Map updates and lighting
+  view.ts          — FOV calculation (shadowcasting)
+  pathfind.ts      — A* pathfinding
+  cave.test.ts     — Integration tests
   index.ts
 ```
 
-**技術的注意点**:
-- FOVアルゴリズム: Angbandのshadowcasting実装を忠実移植
-- パフォーマンス: TypedArray（Int8Array等）でマップグリッド表現
-- 座標系: Step 1のLoc型を活用
+**Technical Notes**:
+- FOV algorithm: Faithful port of Angband's shadowcasting implementation
+- Performance: TypedArray (Int8Array, etc.) for map grid representation
+- Coordinate system: Uses the Loc type from Step 1
 
-**推定規模**: ~3,500行
+**Estimated Size**: ~3,500 lines
 
 ---
 
-## Step 4: エンティティシステム — Player, Monster, Object
+## Step 4: Entity System — Player, Monster, Object
 
-**目的**: ゲーム3大エンティティの生成・管理・相互作用を実装。
+**Goal**: Implement creation, management, and interaction of the three major game entities.
 
-### 4a: プレイヤーシステム
-**対象（C）**: player.c, player-birth.c, player-calcs.c, player-timed.c, player-util.c 等（22ファイル, 12,764行）
+### 4a: Player System
+**Source (C)**: player.c, player-birth.c, player-calcs.c, player-timed.c, player-util.c, etc. (22 files, 12,764 lines)
 
 ```
 packages/@angband/core/src/player/
-  birth.ts         — キャラクター作成
-  calcs.ts         — ステータス計算（装備補正、レベル補正）
-  timed.ts         — 時限効果（毒、加速、透明視等）
-  spell.ts         — 魔法習得・詠唱
-  util.ts          — ユーティリティ
+  birth.ts         — Character creation
+  calcs.ts         — Stat calculations (equipment bonuses, level bonuses)
+  timed.ts         — Timed effects (poison, haste, see invisible, etc.)
+  spell.ts         — Spell learning and casting
+  util.ts          — Utilities
   index.ts
 ```
 
-### 4b: モンスターシステム
-**対象（C）**: mon-attack.c, mon-blow-effects.c, mon-blow-methods.c, mon-init.c, mon-list.c, mon-lore.c, mon-make.c, mon-move.c, mon-msg.c, mon-spell.c, mon-timed.c, mon-util.c 等（30ファイル, 16,351行）
+### 4b: Monster System
+**Source (C)**: mon-attack.c, mon-blow-effects.c, mon-blow-methods.c, mon-init.c, mon-list.c, mon-lore.c, mon-make.c, mon-move.c, mon-msg.c, mon-spell.c, mon-timed.c, mon-util.c, etc. (30 files, 16,351 lines)
 
 ```
 packages/@angband/core/src/monster/
-  make.ts          — モンスター生成・配置
-  move.ts          — 移動AI（経路探索利用）
-  attack.ts        — 近接攻撃
-  spell.ts         — 魔法攻撃
-  lore.ts          — モンスター知識（図鑑）
-  timed.ts         — 時限状態（混乱、恐怖等）
+  make.ts          — Monster generation and placement
+  move.ts          — Movement AI (using pathfinding)
+  attack.ts        — Melee attacks
+  spell.ts         — Spell attacks
+  lore.ts          — Monster knowledge (bestiary)
+  timed.ts         — Timed states (confusion, fear, etc.)
   index.ts
 ```
 
-### 4c: オブジェクトシステム
-**対象（C）**: obj-chest.c, obj-desc.c, obj-gear.c, obj-ignore.c, obj-info.c, obj-init.c, obj-knowledge.c, obj-list.c, obj-make.c, obj-pile.c, obj-power.c, obj-properties.c, obj-slays.c, obj-tval.c, obj-util.c 等（34ファイル, 23,913行）
+### 4c: Object System
+**Source (C)**: obj-chest.c, obj-desc.c, obj-gear.c, obj-ignore.c, obj-info.c, obj-init.c, obj-knowledge.c, obj-list.c, obj-make.c, obj-pile.c, obj-power.c, obj-properties.c, obj-slays.c, obj-tval.c, obj-util.c, etc. (34 files, 23,913 lines)
 
 ```
 packages/@angband/core/src/object/
-  make.ts          — アイテム生成（レベル適正ドロップ）
-  desc.ts          — アイテム名生成（「燃える長剣」等）
-  gear.ts          — 装備管理
-  properties.ts    — アイテム属性・スレイ・耐性
-  pile.ts          — アイテムの山（フロア、インベントリ）
-  power.ts         — アイテムパワー計算
+  make.ts          — Item generation (level-appropriate drops)
+  desc.ts          — Item name generation (e.g. "a Flaming Longsword")
+  gear.ts          — Equipment management
+  properties.ts    — Item properties, slays, and resistances
+  pile.ts          — Item piles (floor, inventory)
+  power.ts         — Item power calculation
   index.ts
 ```
 
-**推定規模**: ~12,000行（3システム合計）
+**Estimated Size**: ~12,000 lines (all 3 systems combined)
 
 ---
 
-## Step 5: ゲームメカニクス — コマンド, 効果, 戦闘
+## Step 5: Game Mechanics — Commands, Effects, Combat
 
-**目的**: プレイヤーの行動（移動、攻撃、魔法等）と
-ゲーム効果（ダメージ、状態異常、投射等）を実装。
+**Goal**: Implement player actions (movement, attacks, spells, etc.) and
+game effects (damage, status ailments, projections, etc.).
 
-**対象ファイル（C）**:
-- `cmd-core.c`, `cmd-cave.c`, `cmd-misc.c`, `cmd-obj.c`, `cmd-pickup.c` 等（8ファイル, ~2,500行）
-- `effect-handler-attack.c`, `effect-handler-general.c` (3,646行)
-- `project.c`, `project-feat.c`, `project-mon.c`, `project-obj.c`, `project-player.c`（5ファイル, ~5,000行）
-- `trap.c`（罠システム）
+**Source Files (C)**:
+- `cmd-core.c`, `cmd-cave.c`, `cmd-misc.c`, `cmd-obj.c`, `cmd-pickup.c`, etc. (8 files, ~2,500 lines)
+- `effect-handler-attack.c`, `effect-handler-general.c` (3,646 lines)
+- `project.c`, `project-feat.c`, `project-mon.c`, `project-obj.c`, `project-player.c` (5 files, ~5,000 lines)
+- `trap.c` (trap system)
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/core/src/command/
-  core.ts          — コマンドディスパッチャー
-  movement.ts      — 移動・探索
-  combat.ts        — 近接・射撃戦闘
-  magic.ts         — 魔法詠唱
-  item.ts          — アイテム使用・装備
+  core.ts          — Command dispatcher
+  movement.ts      — Movement and exploration
+  combat.ts        — Melee and ranged combat
+  magic.ts         — Spell casting
+  item.ts          — Item use and equipment
   index.ts
 
 packages/@angband/core/src/effect/
-  handler.ts       — 効果ハンドラー統合
-  attack.ts        — 攻撃系効果
-  general.ts       — 汎用効果（回復、テレポート等）
+  handler.ts       — Effect handler integration
+  attack.ts        — Attack effects
+  general.ts       — General effects (healing, teleport, etc.)
   index.ts
 
 packages/@angband/core/src/project/
-  project.ts       — 投射計算（ボール、ブレス、ビーム）
-  feat.ts          — 地形への影響
-  monster.ts       — モンスターへの影響
-  player.ts        — プレイヤーへの影響
+  project.ts       — Projection calculation (ball, breath, beam)
+  feat.ts          — Effects on terrain
+  monster.ts       — Effects on monsters
+  player.ts        — Effects on the player
   index.ts
 ```
 
-**推定規模**: ~8,000行
+**Estimated Size**: ~8,000 lines
 
 ---
 
-## Step 6: ワールドシミュレーション — ゲームループ, ダンジョン生成, セーブ/ロード
+## Step 6: World Simulation — Game Loop, Dungeon Generation, Save/Load
 
-**目的**: ゲーム全体の進行管理。ターン処理、階層生成、永続化。
+**Goal**: Manage overall game progression. Turn processing, level generation, persistence.
 
-**対象ファイル（C）**:
-- `game-world.c` — メインゲームループ
-- `game-input.c` — 入力抽象化
-- `game-event.c` — イベントシステム
-- `generate.c`, `gen-cave.c`, `gen-chunk.c`, `gen-monster.c`, `gen-room.c`, `gen-util.c`（6ファイル, 7,600行）
-- `save.c`, `load.c`（セーブ/ロード）
-- `score.c`（スコア管理）
-- `store.c`（店システム）
-- `target.c`（ターゲティング）
+**Source Files (C)**:
+- `game-world.c` — Main game loop
+- `game-input.c` — Input abstraction
+- `game-event.c` — Event system
+- `generate.c`, `gen-cave.c`, `gen-chunk.c`, `gen-monster.c`, `gen-room.c`, `gen-util.c` (6 files, 7,600 lines)
+- `save.c`, `load.c` (save/load)
+- `score.c` (score management)
+- `store.c` (shop system)
+- `target.c` (targeting)
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/core/src/game/
-  world.ts         — ゲームループ（ターン処理）
-  input.ts         — 入力抽象化（UIから分離）
-  event.ts         — イベントバス（Observer pattern）
-  state.ts         — ゲーム状態管理
+  world.ts         — Game loop (turn processing)
+  input.ts         — Input abstraction (separated from UI)
+  event.ts         — Event bus (Observer pattern)
+  state.ts         — Game state management
   index.ts
 
 packages/@angband/core/src/generate/
-  generate.ts      — ダンジョン生成エントリーポイント
-  cave.ts          — 洞窟タイプ別生成
-  room.ts          — 部屋生成
-  monster.ts       — モンスター配置
-  object.ts        — アイテム配置
-  vault.ts         — ヴォールト配置
+  generate.ts      — Dungeon generation entry point
+  cave.ts          — Cave type-specific generation
+  room.ts          — Room generation
+  monster.ts       — Monster placement
+  object.ts        — Item placement
+  vault.ts         — Vault placement
   index.ts
 
 packages/@angband/core/src/save/
-  save.ts          — セーブ（JSON形式）
-  load.ts          — ロード
+  save.ts          — Save (JSON format)
+  load.ts          — Load
   index.ts
 
 packages/@angband/core/src/store/
-  store.ts         — 店の在庫・売買
+  store.ts         — Shop inventory and trading
   index.ts
 ```
 
-**方針**:
-- ゲームループはasync/awaitベース（UIの非同期入力に対応）
-- イベントシステムでcore⇔UI疎結合
-- セーブはJSON（Cのバイナリ形式とは非互換）
-- ダンジョン生成は忠実移植（Angbandの生成アルゴリズムはゲーム性の核）
+**Approach**:
+- Game loop is async/await-based (to support asynchronous UI input)
+- Event system for loose coupling between core and UI
+- Save format is JSON (not compatible with C's binary format)
+- Dungeon generation is a faithful port (Angband's generation algorithms are central to gameplay)
 
-**推定規模**: ~10,000行
+**Estimated Size**: ~10,000 lines
 
 ---
 
-## Step 7: レンダリング & UI — Webフロントエンド
+## Step 7: Rendering & UI — Web Frontend
 
-**目的**: ブラウザで遊べるAngbandを完成させる。
+**Goal**: Complete a browser-playable Angband.
 
-**対象（C参考）**: ui-*.c（79ファイル, 46,648行）— ただしターミナルUIなので参考程度
+**Reference (C)**: ui-*.c (79 files, 46,648 lines) — terminal UI, used only as reference
 
-**成果物（TS）**:
+**Output (TS)**:
 ```
 packages/@angband/renderer/
   src/
-    terminal.ts    — 仮想ターミナルグリッド
-    textblock.ts   — テキストブロック（z-textblock代替）
-    theme.ts       — カラーテーマ
+    terminal.ts    — Virtual terminal grid
+    textblock.ts   — Text block (z-textblock replacement)
+    theme.ts       — Color theme
     index.ts
 
 packages/@angband/web/
   src/
-    App.tsx         — メインアプリ
+    App.tsx         — Main app
     components/
-      GameMap.tsx   — マップ描画（Canvas or DOM grid）
-      Sidebar.tsx   — ステータス表示
-      Messages.tsx  — メッセージログ
-      Inventory.tsx — インベントリ画面
-      CharSheet.tsx — キャラクターシート
+      GameMap.tsx   — Map rendering (Canvas or DOM grid)
+      Sidebar.tsx   — Status display
+      Messages.tsx  — Message log
+      Inventory.tsx — Inventory screen
+      CharSheet.tsx — Character sheet
     hooks/
-      useGame.ts   — ゲームエンジン接続
-      useInput.ts  — キーバインド処理
+      useGame.ts   — Game engine connection
+      useInput.ts  — Keybinding handling
     index.html
     main.tsx
 ```
 
-**方針**:
-- `@angband/core` は純粋ロジック（DOM依存なし）
-- `@angband/renderer` はターミナルグリッド抽象化
-- `@angband/web` はReact/Preact + Canvas描画
-- ASCII表示を基本とし、タイルセットは将来対応
+**Approach**:
+- `@angband/core` is pure logic (no DOM dependency)
+- `@angband/renderer` is a terminal grid abstraction
+- `@angband/web` uses React/Preact + Canvas rendering
+- ASCII display as default, with tileset support planned for the future
 
-**推定規模**: ~8,000行
-
----
-
-## 全体サマリー
-
-| Step | 内容 | 推定行数 | 依存 |
-|------|------|---------|------|
-| 0 (完了) | z-layer基盤 | 3,374行 | — |
-| 1 | 型定義 + データ構造 | ~2,000行 | Step 0 |
-| 2 | データパイプライン | ~3,000行 | Step 1 |
-| 3 | 洞窟 & マップ | ~3,500行 | Step 1 |
-| 4 | エンティティ (Player/Monster/Object) | ~12,000行 | Step 1,2,3 |
-| 5 | ゲームメカニクス | ~8,000行 | Step 3,4 |
-| 6 | ワールドシミュレーション | ~10,000行 | Step 4,5 |
-| 7 | レンダリング & UI | ~8,000行 | Step 6 |
-| **合計** | | **~50,000行** | |
-
-**注**: C版205K行 → TS版~50K行の圧縮理由:
-- C版UI層46K行の大半が不要（Web UIは別設計）
-- Cのメモリ管理・文字列処理コードが不要
-- TypeScriptの表現力（ジェネリクス、スプレッド等）
-- 重複コード・プラットフォーム分岐の排除
+**Estimated Size**: ~8,000 lines
 
 ---
 
-## 移植原則
+## Overall Summary
 
-1. **忠実性**: ゲームロジックのアルゴリズムは本家C版に忠実
-2. **型安全**: TypeScript strictモード最大、noUncheckedIndexedAccess有効
-3. **テスト駆動**: 全モジュールにテスト。C版のテストケースも移植
-4. **Core分離**: `@angband/core` はDOM/Node依存なし（純粋ロジック）
-5. **データ駆動**: ゲームデータは外部ファイル（JSON）から読み込み
-6. **漸進的**: 各Stepで動作するマイルストーン（Step 3後にFOVデモ等）
+| Step | Contents | Estimated Lines | Dependencies |
+|------|----------|----------------|--------------|
+| 0 (Complete) | z-layer foundation | 3,374 lines | — |
+| 1 | Type definitions + data structures | ~2,000 lines | Step 0 |
+| 2 | Data pipeline | ~3,000 lines | Step 1 |
+| 3 | Cave & map | ~3,500 lines | Step 1 |
+| 4 | Entities (Player/Monster/Object) | ~12,000 lines | Step 1,2,3 |
+| 5 | Game mechanics | ~8,000 lines | Step 3,4 |
+| 6 | World simulation | ~10,000 lines | Step 4,5 |
+| 7 | Rendering & UI | ~8,000 lines | Step 6 |
+| **Total** | | **~50,000 lines** | |
+
+**Note**: Reasons for compression from C 205K lines → TS ~50K lines:
+- Most of C's 46K-line UI layer is unnecessary (Web UI is a separate design)
+- C memory management and string processing code is unnecessary
+- TypeScript's expressiveness (generics, spread, etc.)
+- Elimination of duplicate code and platform-specific branches
+
+---
+
+## Porting Principles
+
+1. **Fidelity**: Game logic algorithms are faithful to the original C version
+2. **Type Safety**: TypeScript strict mode at maximum, noUncheckedIndexedAccess enabled
+3. **Test-Driven**: Tests for all modules. Test cases from the C version are also ported
+4. **Core Separation**: `@angband/core` has no DOM/Node dependencies (pure logic)
+5. **Data-Driven**: Game data is loaded from external files (JSON)
+6. **Incremental**: Working milestones at each step (e.g., FOV demo after Step 3)
