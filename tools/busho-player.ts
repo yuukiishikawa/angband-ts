@@ -449,6 +449,190 @@ async function getState(): Promise<any> {
   return res.json();
 }
 
+// ── LLM戦略判断 ──
+// ルールで判断しにくい場面でLLM(Claude haiku)に聞く
+
+const LLM_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
+const LLM_BACKEND = process.env.LLM_BACKEND ?? (LLM_API_KEY ? "anthropic" : "ollama"); // "anthropic" or "ollama"
+const LLM_ENABLED = LLM_BACKEND === "anthropic" ? LLM_API_KEY.length > 0 : true;
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "phi3.5";
+const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
+let llmCallCount = 0;
+let llmCacheHits = 0;
+let llmTotalMs = 0;
+
+// ── 学習キャッシュ ──
+// 過去のLLM判断を保存し、同じ状況で再利用
+const CACHE_FILE = "/tmp/busho-llm-cache.json";
+let llmCache: Record<string, string> = {};
+try {
+  const fs = require("node:fs");
+  if (fs.existsSync(CACHE_FILE)) {
+    llmCache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8"));
+    console.log(`  [LLM] キャッシュ読込: ${Object.keys(llmCache).length}件`);
+  }
+} catch {}
+
+function saveLLMCache() {
+  try {
+    const fs = require("node:fs");
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(llmCache, null, 2));
+  } catch {}
+}
+
+// キャッシュキー: 質問の要点 + CL帯 + DL帯
+function cacheKey(question: string, clLevel: number, dlLevel: number): string {
+  // モンスター名や状況の核心部分を抽出
+  const clBand = Math.floor(clLevel / 5) * 5; // 5刻み
+  const dlBand = Math.floor(dlLevel / 5) * 5;
+  return `${question.slice(0, 80)}|CL${clBand}|DL${dlBand}`;
+}
+
+async function askLLM(question: string, context: string): Promise<string> {
+  if (!LLM_ENABLED) return "";
+
+  // キャッシュチェック
+  const p = (globalThis as any).__lastState?.player;
+  const cl = p?.level ?? 0;
+  const dl = (globalThis as any).__lastState?.depth ?? 0;
+  const key = cacheKey(question, cl, dl);
+  if (llmCache[key]) {
+    llmCacheHits++;
+    console.log(`  [LLM CACHE] ${question.slice(0, 50)} → ${llmCache[key].slice(0, 60)}`);
+    return llmCache[key];
+  }
+
+  llmCallCount++;
+  const start = Date.now();
+  try {
+    let answer = "";
+
+    if (LLM_BACKEND === "ollama") {
+      // Ollama (local)
+      const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+          prompt: `You are an expert Angband roguelike player. Answer concisely.
+
+${context}
+
+${question}
+
+Answer (start with YES or NO, then one short reason):`,
+          stream: false,
+          options: { num_predict: 30 },
+        }),
+      });
+      const data = await res.json() as any;
+      answer = data?.response ?? "";
+    } else {
+      // Anthropic API
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": LLM_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 80,
+          messages: [{
+            role: "user",
+            content: `You are an expert Angband player AI. Answer concisely in one line.
+
+Game state:
+${context}
+
+Question: ${question}
+
+Answer (one line, start with YES/NO or the choice):`,
+          }],
+        }),
+      });
+      const data = await res.json() as any;
+      answer = data?.content?.[0]?.text ?? "";
+    }
+
+    llmTotalMs += Date.now() - start;
+    const ms = Date.now() - start;
+    console.log(`  [LLM ${LLM_BACKEND}] Q: ${question.slice(0, 55)} → ${answer.slice(0, 70)} (${ms}ms)`);
+
+    // キャッシュに保存
+    if (answer) {
+      llmCache[key] = answer;
+      if (llmCallCount % 5 === 0) saveLLMCache(); // 5回ごとに保存
+    }
+
+    return answer;
+  } catch (e) {
+    llmTotalMs += Date.now() - start;
+    return "";
+  }
+}
+
+function gameContextString(state: any): string {
+  const p = state.player;
+  const monsters = state.monsters ?? [];
+  const inv = p.inventory ?? [];
+  const equip = p.equipment ?? [];
+  const nearby = monsters.filter((m: any) => m.distance <= 6).slice(0, 5);
+  const healPots = inv.filter((i: any) => i.name?.includes("Cure") || i.name?.includes("Healing"));
+  const totalHeals = healPots.reduce((s: number, i: any) => s + (i.qty ?? 1), 0);
+  const teleScrolls = inv.filter((i: any) => i.name?.includes("Teleport")).reduce((s: number, i: any) => s + (i.qty ?? 1), 0);
+  const phaseScrolls = inv.filter((i: any) => i.name?.includes("Phase Door")).reduce((s: number, i: any) => s + (i.qty ?? 1), 0);
+  const recallScrolls = inv.filter((i: any) => i.name?.includes("Word of Recall")).reduce((s: number, i: any) => s + (i.qty ?? 1), 0);
+  const speedPots = inv.filter((i: any) => i.name?.includes("Speed")).reduce((s: number, i: any) => s + (i.qty ?? 1), 0);
+  const resists = (p.resistances ?? []).filter((r: any) => r.level > 0).map((r: any) => r.elem);
+
+  return `CL${p.level} DL${state.depth} HP:${p.hp}/${p.maxHp} AC:${p.ac ?? "?"} Speed:${p.speed} Blows:${p.numBlows ?? "?"}
+Heals:${totalHeals} Phase:${phaseScrolls} Teleport:${teleScrolls} WoR:${recallScrolls} Speed:${speedPots}
+Resists: ${resists.length > 0 ? resists.join(",") : "none"}
+Equipment: ${equip.map((e: any) => e.name).join(", ") || "none"}
+Nearby monsters: ${nearby.map((m: any) => `${m.name}(Lv${m.level},HP${m.hp}/${m.maxhp},spd${m.speed},dist${m.distance}${m.isUnique ? ",UNIQUE" : ""}${m.breathElements?.length ? ",BREATH:" + m.breathElements.join("/") : ""})`).join(", ") || "none"}`;
+}
+
+// LLM判断: この敵と戦うべきか逃げるべきか
+async function llmShouldFight(state: any, monster: any): Promise<boolean | null> {
+  if (!LLM_ENABLED) return null; // let rules decide
+  const ctx = gameContextString(state);
+  const answer = await askLLM(
+    `Should I fight ${monster.name} (Lv${monster.level}, HP${monster.maxhp}, speed ${monster.speed}${monster.isUnique ? ", UNIQUE" : ""}) or flee? Consider my HP, healing supplies, and level.`,
+    ctx
+  );
+  if (answer.toUpperCase().startsWith("YES") || answer.toUpperCase().includes("FIGHT")) return true;
+  if (answer.toUpperCase().startsWith("NO") || answer.toUpperCase().includes("FLEE")) return false;
+  return null; // ambiguous → rules decide
+}
+
+// LLM判断: 降下してよいか
+async function llmShouldDescend(state: any): Promise<boolean | null> {
+  if (!LLM_ENABLED) return null;
+  const ctx = gameContextString(state);
+  const answer = await askLLM(
+    `Should I descend to the next dungeon level? Consider my CL vs DL, healing/teleport supplies, equipment quality, and resistances.`,
+    ctx
+  );
+  if (answer.toUpperCase().startsWith("YES")) return true;
+  if (answer.toUpperCase().startsWith("NO")) return false;
+  return null;
+}
+
+// LLM判断: どの装備に変えるべきか
+async function llmChooseEquipment(state: any, current: any, candidate: any): Promise<boolean | null> {
+  if (!LLM_ENABLED) return null;
+  const ctx = gameContextString(state);
+  const answer = await askLLM(
+    `Should I swap my ${current?.name ?? "empty slot"} for ${candidate.name}? Consider AC, damage, resistances, stat bonuses, and weight (heavier weapons = fewer blows).`,
+    ctx
+  );
+  if (answer.toUpperCase().startsWith("YES")) return true;
+  if (answer.toUpperCase().startsWith("NO")) return false;
+  return null;
+}
+
 // ── 戦術判断 ──
 
 function findTile(tiles: any[], feat: number): { x: number; y: number } | null {
@@ -1167,6 +1351,7 @@ async function playGame() {
 
   while (!state.dead && !state.won && state.turn < turnLimit && actionCount < 100000) {
     actionCount++;
+    (globalThis as any).__lastState = state; // LLMキャッシュキー用
     // 録画 (10アクション毎 + イベント時)
     lastRecordedState = state;
     if (actionCount % 10 === 0) recordFrame(state);
@@ -1861,9 +2046,28 @@ async function playGame() {
     // === 優先度3.7: 危険モンスター回避 (隣接前に逃走判定) ===
     const dangerDetectRange = isVeryDeep ? 6 : 5;
     const dangerFleeRange = isVeryDeep ? 4 : 3;
-    const nearDangerous = monsters.filter((m: any) =>
+    let nearDangerous = monsters.filter((m: any) =>
       m.distance <= dangerDetectRange && isDangerousMonster(m, p.level, state.depth, playerResists) && !forceFightMonsters.has(m.name)
     );
+    // LLM判断: ルールでは安全だが怪しい敵にLLMに聞く（同名敵は1回だけ）
+    if (nearDangerous.length === 0 && LLM_ENABLED) {
+      const llmAskedMonsters = (globalThis as any).__llmAskedMonsters ?? new Set<string>();
+      (globalThis as any).__llmAskedMonsters = llmAskedMonsters;
+      const suspicious = monsters.filter((m: any) =>
+        m.distance <= dangerFleeRange && !forceFightMonsters.has(m.name) &&
+        !llmAskedMonsters.has(m.name) &&
+        (m.maxhp > 150 || m.level > p.level + 5 || m.isUnique) &&
+        m.distance >= 2
+      );
+      if (suspicious.length > 0) {
+        const sus = suspicious[0];
+        llmAskedMonsters.add(sus.name);
+        const shouldFight = await llmShouldFight(state, sus);
+        if (shouldFight === false) {
+          nearDangerous = [sus];
+        }
+      }
+    }
     if (nearDangerous.length > 0 && nearDangerous[0].distance <= dangerFleeRange) {
       const dangerMon = nearDangerous[0];
       const monFleeCount = fleeCountByMonster.get(dangerMon.name) || 0;
@@ -2288,10 +2492,21 @@ async function playGame() {
             break;
           }
           if (currentEquip2 && invPower2 > itemPower(currentEquip2)) {
-            addLesson(state.turn, state.depth, "装備変更",
-              `${invItem.name}(power=${invPower2}) > ${currentEquip2.name}(power=${itemPower(currentEquip2)})。交換`);
-            state = await sendCommand({ type: CMD.EQUIP, itemIndex: invItem.slot });
-            break;
+            // LLM装備判断: 武器変更時にLLMに確認（blows低下リスク）
+            let doSwap = true;
+            if (LLM_ENABLED && WEAPON_TVALS.has(invItem.tval)) {
+              const llmOk = await llmChooseEquipment(state, currentEquip2, invItem);
+              if (llmOk === false) {
+                doSwap = false;
+                console.log(`  [LLM VETO] 装備変更見送り: ${invItem.name}`);
+              }
+            }
+            if (doSwap) {
+              addLesson(state.turn, state.depth, "装備変更",
+                `${invItem.name}(power=${invPower2}) > ${currentEquip2.name}(power=${itemPower(currentEquip2)})。交換`);
+              state = await sendCommand({ type: CMD.EQUIP, itemIndex: invItem.slot });
+              break;
+            }
           }
         }
         continue;
@@ -2473,7 +2688,21 @@ async function playGame() {
     const readyToDescend = hpPct >= 0.7 && healingOk && escapeOk && resistCheck &&
       ((clCheck && (enoughKills || explorationStalled || tooLongOnLevel || overleveled)) || lowExplorationEarlyDescent);
 
-    if (readyToDescend) {
+    // LLM降下判断: DL15+で初回のみLLMに確認（1フロア1回限り）
+    let llmDescentVeto = false;
+    if (readyToDescend && LLM_ENABLED && state.depth >= 15) {
+      const vetoKey = `descent_veto_${state.depth}`;
+      if (!(globalThis as any)[vetoKey]) {
+        const llmOk = await llmShouldDescend(state);
+        if (llmOk === false) {
+          llmDescentVeto = true;
+          (globalThis as any)[vetoKey] = true; // この階では1回だけveto
+          console.log(`  [LLM VETO] 降下を見送り (DL${state.depth}) — この階では以後ルールに従う`);
+        }
+      }
+    }
+
+    if (readyToDescend && !llmDescentVeto) {
       const downStair = findTile(tiles, FEAT.DOWN_STAIR);
       if (downStair) {
         const onStair = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
@@ -2771,6 +3000,10 @@ async function playGame() {
   console.log(`  種族/職業: ${fp.race}/${fp.class}`);
   console.log(`  死亡: ${finalState.dead ? `はい (${deathCause})` : "いいえ"}`);
   console.log(`  行動回数: ${actionCount}`);
+  if (LLM_ENABLED) {
+    console.log(`  LLM: ${LLM_BACKEND} 呼出${llmCallCount}回 キャッシュ${llmCacheHits}回 (平均${llmCallCount > 0 ? Math.round(llmTotalMs / llmCallCount) : 0}ms)`);
+    saveLLMCache();
+  }
 
   // 最終フレーム + 録画保存
   recordFrame(finalState, finalState.dead ? `死亡: ${deathCause}` : "生存");
