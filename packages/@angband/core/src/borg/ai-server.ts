@@ -792,7 +792,11 @@ class AIServer {
 
     const player = createPlayer("Agent", race, cls, rng);
     giveStartingItems(player, objectKinds, rng);
-    giveBonusItems(player, objectKinds);
+    // VANILLA mode: skip bonus items when VANILLA=1 env var is set
+    const vanillaMode = process.env.VANILLA === "1";
+    if (!vanillaMode) {
+      giveBonusItems(player, objectKinds);
+    }
     autoEquipStartingItems(player);
 
     // Add Pick to inventory AFTER auto-equip (so it stays in inventory, not weapon slot)
@@ -980,8 +984,9 @@ class AIServer {
                 break;
               }
             }
-            // Resupply on depth change (descent/ascent)
-            if (this.state!.depth !== depthBefore && !this.state!.dead) {
+            // Resupply on depth change (descent/ascent) — skip in VANILLA mode
+            const vanillaRun = process.env.VANILLA === "1";
+            if (this.state!.depth !== depthBefore && !this.state!.dead && !vanillaRun) {
               resupplyOnDescent(this.state!.player, this.objectKinds);
               upgradeEquipmentOnDescent(this.state!.player, this.objectKinds);
             }

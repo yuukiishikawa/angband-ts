@@ -15,7 +15,7 @@ import type { Player } from "../types/player.js";
 import type { Chunk, MonsterId } from "../types/cave.js";
 import type { Monster } from "../types/monster.js";
 import { MonsterRaceFlag, MonsterTempFlag, MonsterTimedEffect } from "../types/monster.js";
-import { Stat, TimedEffect } from "../types/player.js";
+import { Stat, STAT_MAX, TimedEffect } from "../types/player.js";
 import { PY_FOOD_WEAK, PY_FOOD_FAINT, PY_FOOD_STARVE } from "../player/timed.js";
 import { TVal } from "../types/object.js";
 import type { ObjectType } from "../types/object.js";
@@ -901,6 +901,19 @@ function checkExperience(state: GameState): void {
       let mhp = (player.playerHp[player.lev - 1] ?? 10) + Math.floor((bonus * player.lev) / 100);
       if (mhp < player.lev + 1) mhp = player.lev + 1;
       player.mhp = mhp;
+    }
+
+    // Stat gain on level up (port of player_stat_inc from player.c)
+    // Maximize mode: one random stat increases by 1 each level
+    {
+      const rng = state.rng ?? { randint0: (n: number) => Math.floor(Math.random() * n) };
+      const stat = rng.randint0(STAT_MAX);
+      const oldMax = player.statMax[stat] ?? 10;
+      if (oldMax < 18 + 100) {
+        player.statMax[stat] = oldMax + 1;
+        player.statCur[stat] = (player.statCur[stat] ?? 10) + 1;
+        console.error(`[STAT] CL${player.lev}: ${["STR","INT","WIS","DEX","CON"][stat]} increased! ${oldMax} → ${oldMax + 1}\n`);
+      }
     }
 
     // Fully heal on level up
