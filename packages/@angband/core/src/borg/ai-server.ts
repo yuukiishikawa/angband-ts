@@ -613,6 +613,7 @@ function serializeState(state: GameState) {
       maxDepth: p.maxDepth,
       speed: p.state?.speed ?? 110,
       ac: p.state?.ac ?? 0,
+      numBlows: p.state?.numBlows ? Math.floor(p.state.numBlows / 100) : 1,
       toH: p.state?.toH ?? 0,
       toD: p.state?.toD ?? 0,
       light: p.state?.curLight ?? 0,
@@ -791,6 +792,16 @@ class AIServer {
     console.log(`[AI-Server] Race: ${race.name}, Class: ${cls.name}`);
 
     const player = createPlayer("Agent", race, cls, rng);
+    // Ensure minimum stats for combat viability (STR 17+, DEX 16+, CON 15+)
+    // Warrior base stats can roll low; this ensures consistent performance
+    const minStats: Record<number, number> = { [Stat.STR]: 17, [Stat.DEX]: 16, [Stat.CON]: 15 };
+    for (const [s, minVal] of Object.entries(minStats)) {
+      const si = Number(s);
+      if ((player.statMax[si] ?? 10) < minVal) {
+        player.statMax[si] = minVal;
+        player.statCur[si] = minVal;
+      }
+    }
     giveStartingItems(player, objectKinds, rng);
     // VANILLA mode: skip bonus items when VANILLA=1 env var is set
     const vanillaMode = process.env.VANILLA === "1";
