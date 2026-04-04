@@ -473,7 +473,78 @@ let llmCallCount = 0;
 let llmCacheHits = 0;
 let llmTotalMs = 0;
 
-// ローカルLLM (Ollama) はコスト0 → キャッシュなし、毎回フレッシュ判断
+// ── クロスラン記憶: 過去の走行から学んだ教訓をLLMに渡す ──
+const WISDOM_FILE = "/tmp/busho-wisdom.jsonl";
+interface WisdomEntry {
+  seed: number; maxDL: number; maxCL: number; deathDL: number; deathCause: string;
+  hadResists: string; ac: number; dps: number; blows: number;
+  lesson: string; // 自然言語の教訓
+}
+let wisdomEntries: WisdomEntry[] = [];
+try {
+  const fs = require("node:fs");
+  if (fs.existsSync(WISDOM_FILE)) {
+    const lines = fs.readFileSync(WISDOM_FILE, "utf-8").trim().split("\n").filter(Boolean);
+    wisdomEntries = lines.map((l: string) => JSON.parse(l));
+    console.log(`  [WISDOM] 過去の教訓読込: ${wisdomEntries.length}件`);
+  }
+} catch {}
+
+function saveWisdom(entry: WisdomEntry) {
+  try {
+    const fs = require("node:fs");
+    fs.appendFileSync(WISDOM_FILE, JSON.stringify(entry) + "\n");
+    wisdomEntries.push(entry);
+  } catch {}
+}
+
+function wisdomContext(): string {
+  if (wisdomEntries.length === 0) return "";
+  // 最新10件 + 最高DL到達の記録を含める
+  const sorted = [...wisdomEntries].sort((a, b) => b.maxDL - a.maxDL);
+  const best = sorted.slice(0, 3);
+  const recent = wisdomEntries.slice(-5);
+  const unique = [...new Map([...best, ...recent].map(e => [e.lesson, e])).values()];
+  const lines = unique.map(e =>
+    `DL${e.deathDL}/CL${e.maxCL} died to ${e.deathCause} (resist:${e.hadResists} AC:${e.ac} DPS:${e.dps} ${e.blows}blows): ${e.lesson}`
+  );
+  return `\nPast run lessons:\n${lines.join("\n")}`;
+}
+
+// 死亡時に教訓を自動生成
+function generateDeathWisdom(state: any, deathCause: string): string {
+  const p = state.player;
+  const resists = (p.resistances ?? []).filter((r: any) => r.level > 0).map((r: any) => r.elem);
+  const hasAllBase = ["ACID","ELEC","FIRE","COLD"].every(e => resists.includes(e));
+  const hasPois = resists.includes("POIS");
+  const lessons: string[] = [];
+
+  if (deathCause.includes("falcon") || deathCause.includes("blood")) {
+    lessons.push("Speed 130+ enemies (blood falcon) require instant WoR — Phase Door and Teleport are insufficient");
+  }
+  if (deathCause.includes("hydra")) {
+    lessons.push("Multi-headed hydras have very high HP/AC — avoid combat, use Teleport to flee");
+  }
+  if (deathCause.includes("dragon")) {
+    lessons.push(`Dragon breath is deadly ${!hasAllBase ? "without base resists" : "even with resists"} — prioritize elemental resistance gear before deep diving`);
+  }
+  if (deathCause.includes("knight") || deathCause.includes("Troll")) {
+    lessons.push(`High-damage melee enemies at DL${state.depth}+ — need AC ${(p.ac ?? 0) < 80 ? ">80" : ">100"} and healing reserves >10`);
+  }
+  if (deathCause.includes("poison") || deathCause.includes("venom") || deathCause.includes("scorpion")) {
+    lessons.push("Poison damage is lethal without POIS resist — prioritize poison resistance at DL25+");
+  }
+  if (!hasAllBase && state.depth >= 25) {
+    lessons.push(`Died at DL${state.depth} with only ${resists.length} resists — need all 4 base resists before DL25`);
+  }
+  if ((p.ac ?? 0) < 60 && state.depth >= 20) {
+    lessons.push(`AC ${p.ac} too low for DL${state.depth} — ensure equipment upgrades are being worn`);
+  }
+  if (lessons.length === 0) {
+    lessons.push(`Died at DL${state.depth} to ${deathCause} — consider more cautious descent or better supplies`);
+  }
+  return lessons.join(". ");
+}
 
 async function askLLM(question: string, context: string): Promise<string> {
   if (!LLM_ENABLED) return "";
@@ -491,7 +562,7 @@ async function askLLM(question: string, context: string): Promise<string> {
         body: JSON.stringify({
           model: OLLAMA_MODEL,
           prompt: `You are an expert Angband roguelike player. Answer concisely.
-
+${wisdomContext()}
 ${context}
 
 ${question}
@@ -518,7 +589,7 @@ Answer (start with YES or NO, then one short reason):`,
           messages: [{
             role: "user",
             content: `You are an expert Angband player AI. Answer concisely in one line.
-
+${wisdomContext()}
 Game state:
 ${context}
 
@@ -3175,6 +3246,28 @@ async function playGame() {
     lessons,
     tactics: extractTactics(),
   };
+
+  // クロスラン記憶: 教訓を保存
+  if (finalState.dead) {
+    const resists = (fp.resistances ?? []).filter((r: any) => r.level > 0).map((r: any) => r.elem);
+    const resistStr = resists.length > 0 ? resists.join(",") : "none";
+    const lastDescent = lessons.filter(l => l.event === "降下").pop();
+    const blowsMatch = lastDescent?.lesson.match(/(\d+)blows/);
+    const dpsMatch = lastDescent?.lesson.match(/DPS(\d+)/);
+    const acMatch = lastDescent?.lesson.match(/AC(\d+)/);
+    const wisdom: WisdomEntry = {
+      seed: 0, maxDL: maxDepthReached, maxCL: maxLevelReached,
+      deathDL: finalState.depth ?? maxDepthReached,
+      deathCause,
+      hadResists: resistStr,
+      ac: acMatch ? Number(acMatch[1]) : fp.ac ?? 0,
+      dps: dpsMatch ? Number(dpsMatch[1]) : 0,
+      blows: blowsMatch ? Number(blowsMatch[1]) : 0,
+      lesson: generateDeathWisdom(finalState, deathCause),
+    };
+    saveWisdom(wisdom);
+    console.log(`  [WISDOM] 教訓保存: ${wisdom.lesson.slice(0, 80)}`);
+  }
 
   const reportPath = "/tmp/busho-play-report.json";
   const fs = await import("node:fs");
