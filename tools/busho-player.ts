@@ -1477,28 +1477,27 @@ async function playGame() {
       7: [-1, -1], 8: [0, -1], 9: [1, -1],
     };
 
-    // === 装備最適化 (100ターンに1回 + 深度変更時) ===
-    // ループ防止: スワップ済みペアを記録し、同じ組み合わせの再スワップを禁止
-    const swapHistory = (globalThis as any).__swapHistory ?? new Set<string>();
-    (globalThis as any).__swapHistory = swapHistory;
+    // === 装備最適化 (500ターンに1回 + 深度変更時) ===
+    // equippedNames: 現在装備中のアイテム名セット。同名アイテムの再装備ループを防止
+    const equippedNames = (globalThis as any).__equippedNames ?? new Set<string>();
+    (globalThis as any).__equippedNames = equippedNames;
     const lastEquipCheck = (globalThis as any).__lastEquipCheck ?? 0;
-    const equipCheckInterval = 100; // 100ターンに1回
-    const shouldCheckEquip = state.turn - lastEquipCheck >= equipCheckInterval;
+    const shouldCheckEquip = state.turn - lastEquipCheck >= 500;
     if (shouldCheckEquip && monsters.filter((m: any) => m.distance <= 2).length === 0) {
       (globalThis as any).__lastEquipCheck = state.turn;
       const equip = p.equipment ?? [];
+      // 現在の装備名を記録
+      for (const e of equip) { if (e?.name) equippedNames.add(e.name); }
       for (const invItem of inv) {
         if (!EQUIPPABLE_TVALS.has(invItem.tval)) continue;
+        // 既に装備したことのあるアイテムは無視 (ループ防止)
+        if (equippedNames.has(invItem.name)) continue;
         const curEquip = equip.find((e: any) => sameEquipCategory(e.tval, invItem.tval));
-        // ループ防止: このペアで既にスワップ済みなら無視
-        const pairKey = `${invItem.name}|${curEquip?.name ?? "empty"}`;
-        const reversePairKey = `${curEquip?.name ?? "empty"}|${invItem.name}`;
-        if (swapHistory.has(pairKey) || swapHistory.has(reversePairKey)) continue;
         const invPow = itemPower(invItem);
-        const shouldEquip = !curEquip ? invPow > 0 : invPow > itemPower(curEquip);
-        if (shouldEquip) {
-          swapHistory.add(pairKey);
-          console.log(`  [自動装備] ${invItem.name}(pow=${invPow}) ${curEquip ? `> ${curEquip.name}(pow=${itemPower(curEquip)})` : "(空スロット)"}`);
+        const curPow = curEquip ? itemPower(curEquip) : -1;
+        if (invPow > curPow * 1.2 || (!curEquip && invPow > 0)) {
+          equippedNames.add(invItem.name);
+          console.log(`  [自動装備] ${invItem.name}(pow=${invPow}) ${curEquip ? `> ${curEquip.name}(pow=${curPow})` : "(空スロット)"}`);
           state = await sendCommand({ type: CMD.EQUIP, itemIndex: invItem.slot });
           break;
         }
@@ -1512,8 +1511,7 @@ async function playGame() {
       killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
       levelEntryDetected = false; unreachableItems.clear();
       teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; supplyWoRUsedThisLevel = false; fleeCountByMonster.clear(); forceFightMonsters.clear(); retreatMode = false;
-      // 深度変更時にスワップ履歴・チェックタイマー・群れカウンターリセット
-      if ((globalThis as any).__swapHistory) (globalThis as any).__swapHistory.clear();
+      // 深度変更時にチェックタイマー・群れカウンターリセット (装備名履歴は保持)
       (globalThis as any).__lastEquipCheck = 0;
       (globalThis as any).__herdFleeCount = 0;
       if (state.depth > maxDepthReached) maxDepthReached = state.depth;
