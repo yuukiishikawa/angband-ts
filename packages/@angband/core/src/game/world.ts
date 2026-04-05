@@ -37,7 +37,7 @@ import { monsterAttackPlayer, applyBlowEffect } from "../monster/attack.js";
 import { monsterDeath } from "../monster/death.js";
 import { monsterChooseSpell, monsterCastSpell } from "../monster/spell.js";
 import { expForPlayerLevel } from "../player/util.js";
-import { calcBonuses, calcMana } from "../player/calcs.js";
+import { calcBonuses, calcMana, modifyStatValue } from "../player/calcs.js";
 
 // ── Constants ──
 
@@ -904,15 +904,18 @@ function checkExperience(state: GameState): void {
     }
 
     // Stat gain on level up (port of player_stat_inc from player.c)
-    // Maximize mode: one random stat increases by 1 each level
+    // Maximize mode: one random stat increases each level
+    // Uses modifyStatValue: below 18 adds +1, at 18+ adds +10 (Angband stat format)
     {
       const rng = state.rng ?? { randint0: (n: number) => Math.floor(Math.random() * n) };
       const stat = rng.randint0(STAT_MAX);
       const oldMax = player.statMax[stat] ?? 10;
       if (oldMax < 18 + 100) {
-        player.statMax[stat] = oldMax + 1;
-        player.statCur[stat] = (player.statCur[stat] ?? 10) + 1;
-        console.error(`[STAT] CL${player.lev}: ${["STR","INT","WIS","DEX","CON"][stat]} increased! ${oldMax} → ${oldMax + 1}\n`);
+        const newMax = modifyStatValue(oldMax, 1);
+        player.statMax[stat] = newMax;
+        const oldCur = player.statCur[stat] ?? 10;
+        player.statCur[stat] = modifyStatValue(oldCur, 1);
+        console.error(`[STAT] CL${player.lev}: ${["STR","INT","WIS","DEX","CON"][stat]} increased! ${oldMax} → ${newMax}\n`);
       }
     }
 

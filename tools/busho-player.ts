@@ -174,6 +174,10 @@ function findBestWeaponForMonster(
 }
 
 // 装備品のパワースコア計算 (フラグ・耐性・修正値を考慮)
+// 現在のプレイヤー耐性セット（グローバル、毎ターン更新）
+let currentPlayerResists = new Set<number>();
+let currentDepth = 0;
+
 function itemPower(item: {
   tval: number; toH: number; toD: number; toA: number;
   ac?: number; dd?: number; ds?: number;
@@ -211,12 +215,18 @@ function itemPower(item: {
     if (flags.has(i)) score += 3;
   }
 
-  // 耐性ボーナス (base elements特に重要)
+  // 耐性ボーナス — 足りない耐性は超高評価
   for (const r of item.resists ?? []) {
     if (r.level > 0) {
-      if (r.elem <= ELEM.COLD) score += 15; // base4 resist
-      else if (r.elem === ELEM.POIS) score += 12;
-      else score += 8; // high resist
+      const isMissing = !currentPlayerResists.has(r.elem);
+      const depthMultiplier = currentDepth >= 30 ? 3 : currentDepth >= 20 ? 2 : 1;
+      if (r.elem <= ELEM.COLD) {
+        score += isMissing ? 40 * depthMultiplier : 15; // 足りない基本耐性は超重要
+      } else if (r.elem === ELEM.POIS) {
+        score += isMissing ? 30 * depthMultiplier : 12;
+      } else {
+        score += isMissing ? 20 * depthMultiplier : 8;
+      }
     }
   }
 
@@ -302,6 +312,9 @@ function isDangerousMonster(mon: {
     if (mon.speed > 120) return true;
     if (mon.level > playerLevel * 1.5 && mon.level >= 10) return true;
     if (mon.maxhp > 200 && mon.level > playerLevel + 3) return true;
+    // 高HP敵 (hydra, golem, knight等) は消耗戦で不利
+    if (mon.maxhp >= 300) return true;
+    if (mon.maxhp >= 200 && depth >= 30) return true;
     // 耐性なしブレス持ちで格上 → 危険
     if (hasUnresistedBreath && mon.level >= playerLevel) return true;
     // 召喚持ちは同レベル以上で危険
@@ -461,46 +474,81 @@ let llmCallCount = 0;
 let llmCacheHits = 0;
 let llmTotalMs = 0;
 
-// ── 学習キャッシュ ──
-// 過去のLLM判断を保存し、同じ状況で再利用
-const CACHE_FILE = "/tmp/busho-llm-cache.json";
-let llmCache: Record<string, string> = {};
+// ── クロスラン記憶: 過去の走行から学んだ教訓をLLMに渡す ──
+const WISDOM_FILE = "/tmp/busho-wisdom.jsonl";
+interface WisdomEntry {
+  seed: number; maxDL: number; maxCL: number; deathDL: number; deathCause: string;
+  hadResists: string; ac: number; dps: number; blows: number;
+  lesson: string; // 自然言語の教訓
+}
+let wisdomEntries: WisdomEntry[] = [];
 try {
   const fs = require("node:fs");
-  if (fs.existsSync(CACHE_FILE)) {
-    llmCache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8"));
-    console.log(`  [LLM] キャッシュ読込: ${Object.keys(llmCache).length}件`);
+  if (fs.existsSync(WISDOM_FILE)) {
+    const lines = fs.readFileSync(WISDOM_FILE, "utf-8").trim().split("\n").filter(Boolean);
+    wisdomEntries = lines.map((l: string) => JSON.parse(l));
+    console.log(`  [WISDOM] 過去の教訓読込: ${wisdomEntries.length}件`);
   }
 } catch {}
 
-function saveLLMCache() {
+function saveWisdom(entry: WisdomEntry) {
   try {
     const fs = require("node:fs");
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(llmCache, null, 2));
+    fs.appendFileSync(WISDOM_FILE, JSON.stringify(entry) + "\n");
+    wisdomEntries.push(entry);
   } catch {}
 }
 
-// キャッシュキー: 質問の要点 + CL帯 + DL帯
-function cacheKey(question: string, clLevel: number, dlLevel: number): string {
-  // モンスター名や状況の核心部分を抽出
-  const clBand = Math.floor(clLevel / 5) * 5; // 5刻み
-  const dlBand = Math.floor(dlLevel / 5) * 5;
-  return `${question.slice(0, 80)}|CL${clBand}|DL${dlBand}`;
+function wisdomContext(): string {
+  if (wisdomEntries.length === 0) return "";
+  // 最新10件 + 最高DL到達の記録を含める
+  const sorted = [...wisdomEntries].sort((a, b) => b.maxDL - a.maxDL);
+  const best = sorted.slice(0, 3);
+  const recent = wisdomEntries.slice(-5);
+  const unique = [...new Map([...best, ...recent].map(e => [e.lesson, e])).values()];
+  const lines = unique.map(e =>
+    `DL${e.deathDL}/CL${e.maxCL} died to ${e.deathCause} (resist:${e.hadResists} AC:${e.ac} DPS:${e.dps} ${e.blows}blows): ${e.lesson}`
+  );
+  return `\nPast run lessons:\n${lines.join("\n")}`;
+}
+
+// 死亡時に教訓を自動生成
+function generateDeathWisdom(state: any, deathCause: string): string {
+  const p = state.player;
+  const resists = (p.resistances ?? []).filter((r: any) => r.level > 0).map((r: any) => r.elem);
+  const hasAllBase = ["ACID","ELEC","FIRE","COLD"].every(e => resists.includes(e));
+  const hasPois = resists.includes("POIS");
+  const lessons: string[] = [];
+
+  if (deathCause.includes("falcon") || deathCause.includes("blood")) {
+    lessons.push("Speed 130+ enemies (blood falcon) require instant WoR — Phase Door and Teleport are insufficient");
+  }
+  if (deathCause.includes("hydra")) {
+    lessons.push("Multi-headed hydras have very high HP/AC — avoid combat, use Teleport to flee");
+  }
+  if (deathCause.includes("dragon")) {
+    lessons.push(`Dragon breath is deadly ${!hasAllBase ? "without base resists" : "even with resists"} — prioritize elemental resistance gear before deep diving`);
+  }
+  if (deathCause.includes("knight") || deathCause.includes("Troll")) {
+    lessons.push(`High-damage melee enemies at DL${state.depth}+ — need AC ${(p.ac ?? 0) < 80 ? ">80" : ">100"} and healing reserves >10`);
+  }
+  if (deathCause.includes("poison") || deathCause.includes("venom") || deathCause.includes("scorpion")) {
+    lessons.push("Poison damage is lethal without POIS resist — prioritize poison resistance at DL25+");
+  }
+  if (!hasAllBase && state.depth >= 25) {
+    lessons.push(`Died at DL${state.depth} with only ${resists.length} resists — need all 4 base resists before DL25`);
+  }
+  if ((p.ac ?? 0) < 60 && state.depth >= 20) {
+    lessons.push(`AC ${p.ac} too low for DL${state.depth} — ensure equipment upgrades are being worn`);
+  }
+  if (lessons.length === 0) {
+    lessons.push(`Died at DL${state.depth} to ${deathCause} — consider more cautious descent or better supplies`);
+  }
+  return lessons.join(". ");
 }
 
 async function askLLM(question: string, context: string): Promise<string> {
   if (!LLM_ENABLED) return "";
-
-  // キャッシュチェック
-  const p = (globalThis as any).__lastState?.player;
-  const cl = p?.level ?? 0;
-  const dl = (globalThis as any).__lastState?.depth ?? 0;
-  const key = cacheKey(question, cl, dl);
-  if (llmCache[key]) {
-    llmCacheHits++;
-    console.log(`  [LLM CACHE] ${question.slice(0, 50)} → ${llmCache[key].slice(0, 60)}`);
-    return llmCache[key];
-  }
 
   llmCallCount++;
   const start = Date.now();
@@ -515,7 +563,7 @@ async function askLLM(question: string, context: string): Promise<string> {
         body: JSON.stringify({
           model: OLLAMA_MODEL,
           prompt: `You are an expert Angband roguelike player. Answer concisely.
-
+${wisdomContext()}
 ${context}
 
 ${question}
@@ -542,7 +590,7 @@ Answer (start with YES or NO, then one short reason):`,
           messages: [{
             role: "user",
             content: `You are an expert Angband player AI. Answer concisely in one line.
-
+${wisdomContext()}
 Game state:
 ${context}
 
@@ -559,12 +607,6 @@ Answer (one line, start with YES/NO or the choice):`,
     llmTotalMs += Date.now() - start;
     const ms = Date.now() - start;
     console.log(`  [LLM ${LLM_BACKEND}] Q: ${question.slice(0, 55)} → ${answer.slice(0, 70)} (${ms}ms)`);
-
-    // キャッシュに保存
-    if (answer) {
-      llmCache[key] = answer;
-      if (llmCallCount % 5 === 0) saveLLMCache(); // 5回ごとに保存
-    }
 
     return answer;
   } catch (e) {
@@ -624,8 +666,59 @@ async function llmShouldDescend(state: any): Promise<boolean | null> {
 async function llmChooseEquipment(state: any, current: any, candidate: any): Promise<boolean | null> {
   if (!LLM_ENABLED) return null;
   const ctx = gameContextString(state);
+  const currentResists = (current?.resists ?? []).filter((r: any) => r.level > 0).map((r: any) => {
+    const names = ["ACID","ELEC","FIRE","COLD","POIS","LIGHT","DARK","SOUND","SHARD","NEXUS","NETHER","CHAOS","DISEN"];
+    return names[r.elem] ?? `elem${r.elem}`;
+  });
+  const candidateResists = (candidate?.resists ?? []).filter((r: any) => r.level > 0).map((r: any) => {
+    const names = ["ACID","ELEC","FIRE","COLD","POIS","LIGHT","DARK","SOUND","SHARD","NEXUS","NETHER","CHAOS","DISEN"];
+    return names[r.elem] ?? `elem${r.elem}`;
+  });
   const answer = await askLLM(
-    `Should I swap my ${current?.name ?? "empty slot"} for ${candidate.name}? Consider AC, damage, resistances, stat bonuses, and weight (heavier weapons = fewer blows).`,
+    `Should I swap ${current?.name ?? "empty"} (resists: ${currentResists.join(",") || "none"}) for ${candidate.name} (resists: ${candidateResists.join(",") || "none"})? In Angband, elemental resists are CRITICAL for survival in deep dungeon. Weight affects number of blows.`,
+    ctx
+  );
+  if (answer.toUpperCase().startsWith("YES")) return true;
+  if (answer.toUpperCase().startsWith("NO")) return false;
+  return null;
+}
+
+// LLM判断: 戦闘中にヒールすべきか逃走すべきか
+async function llmHealOrFlee(state: any, enemies: any[], hpPct: number): Promise<"heal" | "flee" | "fight" | null> {
+  if (!LLM_ENABLED) return null;
+  const ctx = gameContextString(state);
+  const enemyStr = enemies.slice(0, 3).map((m: any) =>
+    `${m.name}(Lv${m.level},HP${m.hp},spd${m.speed}${m.isUnique ? ",UNQ" : ""})`).join(", ");
+  const answer = await askLLM(
+    `HP ${Math.round(hpPct*100)}% with ${enemies.length} adjacent enemies: ${enemyStr}. Should I HEAL (use potion), FLEE (teleport away), or FIGHT (keep attacking)?`,
+    ctx
+  );
+  const up = answer.toUpperCase();
+  if (up.includes("HEAL")) return "heal";
+  if (up.includes("FLEE") || up.includes("TELEPORT") || up.includes("ESCAPE")) return "flee";
+  if (up.includes("FIGHT") || up.includes("ATTACK")) return "fight";
+  return null;
+}
+
+// LLM判断: WoR帰還すべきか (深層で危険な状況)
+async function llmShouldRecall(state: any): Promise<boolean | null> {
+  if (!LLM_ENABLED) return null;
+  const ctx = gameContextString(state);
+  const answer = await askLLM(
+    `Should I use Word of Recall to return to town? Consider my HP, healing supplies, and the danger level at current depth. Low supplies or dangerous depth = YES.`,
+    ctx
+  );
+  if (answer.toUpperCase().startsWith("YES")) return true;
+  if (answer.toUpperCase().startsWith("NO")) return false;
+  return null;
+}
+
+// LLM判断: この階の探索を続けるべきか (レベリング vs 降下)
+async function llmShouldExploreMore(state: any, killsThisLevel: number, turnsOnLevel: number): Promise<boolean | null> {
+  if (!LLM_ENABLED) return null;
+  const ctx = gameContextString(state);
+  const answer = await askLLM(
+    `I've killed ${killsThisLevel} monsters and spent ${turnsOnLevel} turns on DL${state.depth}. Should I keep exploring this level for more XP/items (YES) or descend to the next level (NO)? Consider my CL vs DL ratio and equipment readiness.`,
     ctx
   );
   if (answer.toUpperCase().startsWith("YES")) return true;
@@ -1250,8 +1343,9 @@ async function buyEquipment(state: any) {
   const equip = p.equipment ?? [];
   let totalUpgrades = 0;
 
-  // 武器店(2)と防具店(1)をチェック
-  for (const storeType of [2, 1]) {
+  // 全店舗をチェック: 武器(2), 防具(1), 魔法(5), 黒市(6)
+  // リング/アミュレットの耐性装備も探す
+  for (const storeType of [2, 1, 5, 6]) {
     const freshState = await getState();
     currentGold = freshState.player.gold;
     if (currentGold < 100) break;
@@ -1270,10 +1364,16 @@ async function buyEquipment(state: any) {
       const currentSlotEquip = currentEquip.find((e: any) => sameEquipCategory(e.tval, stockItem.tval));
       const currentPower = currentSlotEquip ? itemPower(currentSlotEquip) : 0;
 
-      // 20%以上パワーアップ or 空スロットでパワー正
-      if (stockPower > currentPower * 1.2 || (!currentSlotEquip && stockPower > 10)) {
-        // 高すぎるものは買わない（ゴールドの60%以上は使わない）
-        if (stockItem.price > currentGold * 0.6) continue;
+      // 耐性装備チェック: 足りない耐性を持つアイテムは強く優先
+      const hasNeededResist = (stockItem.resists ?? []).some((r: any) =>
+        r.level > 0 && !currentPlayerResists.has(r.elem)
+      );
+
+      // 20%以上パワーアップ or 空スロット or 足りない耐性を持つ
+      if (stockPower > currentPower * 1.2 || (!currentSlotEquip && stockPower > 10) || hasNeededResist) {
+        // 耐性装備はゴールドの80%まで出す、通常は60%
+        const maxSpend = hasNeededResist ? 0.8 : 0.6;
+        if (stockItem.price > currentGold * maxSpend) continue;
 
         try {
           const res = await fetch(`${API}/buy`, {
@@ -1363,13 +1463,47 @@ async function playGame() {
     const hpPct = p.hp / p.maxHp;
     // Player resistances from calcBonuses (race + equipment)
     const playerResists = new Set<string>();
+    currentPlayerResists = new Set<number>(); // itemPower用の数値版
+    currentDepth = state.depth;
     for (const r of (p as any).resistances ?? []) {
-      if (r.level > 0) playerResists.add(r.elem);
+      if (r.level > 0) {
+        playerResists.add(r.elem);
+        // 文字列→数値変換
+        const idx = ELEM_NAME_TO_IDX[r.elem];
+        if (idx !== undefined) currentPlayerResists.add(idx);
+      }
     }
     const dirOffsets: Record<number, [number, number]> = {
       1: [-1, 1], 2: [0, 1], 3: [1, 1], 4: [-1, 0], 6: [1, 0],
       7: [-1, -1], 8: [0, -1], 9: [1, -1],
     };
+
+    // === 装備最適化 (500ターンに1回 + 深度変更時) ===
+    // equippedNames: 現在装備中のアイテム名セット。同名アイテムの再装備ループを防止
+    const equippedNames = (globalThis as any).__equippedNames ?? new Set<string>();
+    (globalThis as any).__equippedNames = equippedNames;
+    const lastEquipCheck = (globalThis as any).__lastEquipCheck ?? 0;
+    const shouldCheckEquip = state.turn - lastEquipCheck >= 500;
+    if (shouldCheckEquip && monsters.filter((m: any) => m.distance <= 2).length === 0) {
+      (globalThis as any).__lastEquipCheck = state.turn;
+      const equip = p.equipment ?? [];
+      // 現在の装備名を記録
+      for (const e of equip) { if (e?.name) equippedNames.add(e.name); }
+      for (const invItem of inv) {
+        if (!EQUIPPABLE_TVALS.has(invItem.tval)) continue;
+        // 既に装備したことのあるアイテムは無視 (ループ防止)
+        if (equippedNames.has(invItem.name)) continue;
+        const curEquip = equip.find((e: any) => sameEquipCategory(e.tval, invItem.tval));
+        const invPow = itemPower(invItem);
+        const curPow = curEquip ? itemPower(curEquip) : -1;
+        if (invPow > curPow * 1.2 || (!curEquip && invPow > 0)) {
+          equippedNames.add(invItem.name);
+          console.log(`  [自動装備] ${invItem.name}(pow=${invPow}) ${curEquip ? `> ${curEquip.name}(pow=${curPow})` : "(空スロット)"}`);
+          state = await sendCommand({ type: CMD.EQUIP, itemIndex: invItem.slot });
+          break;
+        }
+      }
+    }
 
     // Detect level change (WoR, stairs, etc.) and reset exploration state
     if (state.depth !== lastKnownDepth) {
@@ -1378,6 +1512,9 @@ async function playGame() {
       killsThisLevel = 0; levelEntryTurn = state.turn; explorationRateWindow = [];
       levelEntryDetected = false; unreachableItems.clear();
       teleportLoopCount = 0; lastTeleportArea = ""; descentTeleportCount = 0; supplyWoRUsedThisLevel = false; fleeCountByMonster.clear(); forceFightMonsters.clear(); retreatMode = false;
+      // 深度変更時にチェックタイマー・群れカウンターリセット (装備名履歴は保持)
+      (globalThis as any).__lastEquipCheck = 0;
+      (globalThis as any).__herdFleeCount = 0;
       if (state.depth > maxDepthReached) maxDepthReached = state.depth;
       lastKnownDepth = state.depth;
 
@@ -1444,21 +1581,36 @@ async function playGame() {
         levelEntryDetected = false; unreachableItems.clear();
         continue;
       }
-      // 階段上にいない → テレポートで逃走
+      // 階段上にいない → 群れ脱出カウンター: 3回Teleport後はWoRで完全離脱
+      const herdFleeCount = (globalThis as any).__herdFleeCount ?? 0;
+      (globalThis as any).__herdFleeCount = herdFleeCount + 1;
+      // 3回以上群れ脱出 or DL30+ → WoR優先 (同じ階でTeleportしても群れに戻る)
+      if ((herdFleeCount >= 3 || state.depth >= 30) && state.depth > 0 && !(p.wordRecall > 0)) {
+        const recallSlot = findRecallScroll(inv);
+        if (recallSlot !== null) {
+          addLesson(state.turn, state.depth, "群れ脱出",
+            `モンスター${monsters.length}体！${herdFleeCount+1}回目。WoRで帰還`);
+          (globalThis as any).__herdFleeCount = 0;
+          state = await sendCommand({ type: CMD.READ, itemIndex: recallSlot });
+          continue;
+        }
+      }
+      // Teleport (最初の3回)
       const teleSlot = findTeleportScroll(inv);
       if (teleSlot !== null) {
         addLesson(state.turn, state.depth, "群れ脱出",
-          `モンスター${monsters.length}体！Teleportで脱出`);
+          `モンスター${monsters.length}体！Teleportで脱出(${herdFleeCount+1}回目)`);
         state = await sendCommand({ type: CMD.READ, itemIndex: teleSlot });
         stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
         continue;
       }
-      // WoR
+      // Teleportもない → WoR
       if (state.depth > 0 && !(p.wordRecall > 0)) {
         const recallSlot = findRecallScroll(inv);
         if (recallSlot !== null) {
           addLesson(state.turn, state.depth, "群れ脱出",
             `モンスター${monsters.length}体！WoRで帰還`);
+          (globalThis as any).__herdFleeCount = 0;
           state = await sendCommand({ type: CMD.READ, itemIndex: recallSlot });
           continue;
         }
@@ -1726,8 +1878,17 @@ async function playGame() {
         && monsters.filter((m: any) => m.distance <= 3).length === 0) {
       const cureQty2 = inv.filter((i: any) => i.name?.includes("Cure") && i.qty > 0)
         .reduce((s: number, i: any) => s + i.qty, 0);
-      const minCureForDepth = state.depth >= 20 ? 8 : state.depth >= 15 ? 5 : 3;
-      if (cureQty2 < minCureForDepth) {
+      const minCureForDepth = state.depth >= 35 ? 15 : state.depth >= 25 ? 10 : state.depth >= 20 ? 8 : state.depth >= 15 ? 5 : 3;
+      // ルール基準 OR LLM判断で帰還
+      let shouldRecall = cureQty2 < minCureForDepth;
+      const llmRecallCd = (globalThis as any).__llmRecallCd ?? 0;
+      if (!shouldRecall && LLM_ENABLED && state.depth >= 15 && cureQty2 < minCureForDepth * 2
+          && state.turn - llmRecallCd >= 200) {
+        (globalThis as any).__llmRecallCd = state.turn;
+        const llmRecall = await llmShouldRecall(state);
+        if (llmRecall === true) shouldRecall = true;
+      }
+      if (shouldRecall) {
         const recallSlot2 = findRecallScroll(inv);
         if (recallSlot2 !== null) {
           supplyWoRUsedThisLevel = true;
@@ -2078,6 +2239,18 @@ async function playGame() {
       const isTooToughToFight = (dangerMon.isUnique && dangerMon.maxhp > 200) ||
         (dangerMon.isUnique && dangerMon.level > p.level + 3);
 
+      // DL30+ユニーク: 2回逃走したらWoR帰還 (Lokkak等の追跡型ユニーク対策)
+      if (dangerMon.isUnique && state.depth >= 30 && monFleeCount >= 2 && !(p.wordRecall > 0)) {
+        const recallSlotUniq = findRecallScroll(inv);
+        if (recallSlotUniq !== null) {
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+          addLesson(state.turn, state.depth, "ユニーク帰還",
+            `${dangerMon.name}(Lv${dangerMon.level})から${monFleeCount+1}回逃走。DL30+ユニーク→WoR帰還`);
+          state = await sendCommand({ type: CMD.READ, itemIndex: recallSlotUniq });
+          continue;
+        }
+      }
+
       // 6回以上逃走 → もう逃げるのは無駄。forceFight登録して戦闘に移行 (強敵は除外)
       if (monFleeCount >= 6 && !isTooFastToFight && !isTooToughToFight) {
         forceFightMonsters.add(dangerMon.name);
@@ -2117,8 +2290,8 @@ async function playGame() {
             fleeCountByMonster.clear();
             continue;
           }
-          // 2nd: WoRで帰還 (Teleportより確実)
-          if (monFleeCount >= 2 && state.depth > 0 && !(p.wordRecall > 0)) {
+          // 2nd: WoRで帰還 (Teleportより確実) — 速度130+は初回から即WoR
+          if (state.depth > 0 && !(p.wordRecall > 0)) {
             const recallSlotFast = findRecallScroll(inv);
             if (recallSlotFast !== null) {
               fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
@@ -2193,9 +2366,11 @@ async function playGame() {
           continue;
         }
       }
-      // 速度120+の敵はPhase Door(2マス)では逃げきれない → Teleport優先
+      // 速度120+、高HP300+、DL20+ユニーク、DL18+の敵はPhase Door(2マス)では逃げきれない → Teleport優先
       const dangerIsFast = dangerMon.speed >= 120;
-      if (dangerIsFast || state.depth >= 18) {
+      const dangerIsHighHp = dangerMon.maxhp >= 300;
+      const dangerIsDeepUnique = dangerMon.isUnique && state.depth >= 20;
+      if (dangerIsFast || dangerIsHighHp || dangerIsDeepUnique || state.depth >= 18) {
         const teleSlotFast = findTeleportScroll(inv);
         if (teleSlotFast !== null) {
           fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
@@ -2372,9 +2547,11 @@ async function playGame() {
           }
         }
 
-        // 速度120+敵 or DL18+では包囲時もTeleport優先
+        // 高HP+高AC敵 (hydra等) はPhase Doorでは逃げきれない → Teleport優先
+        const hasHighHpAcAdjacent = adjacentMonsters.some((m: any) => m.maxhp >= 200 && m.hp > 100);
+        // 速度120+敵 or DL18+ or 高HP+高AC敵では包囲時もTeleport優先
         const hasFastAdjacent = adjacentMonsters.some((m: any) => m.speed >= 120);
-        if (hasFastAdjacent || state.depth >= 18) {
+        if (hasFastAdjacent || state.depth >= 18 || hasHighHpAcAdjacent) {
           const teleSlotSurr = findTeleportScroll(inv);
           if (teleSlotSurr !== null) {
             fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
@@ -2409,8 +2586,32 @@ async function playGame() {
         }
       }
 
-      // 戦闘中回復: HP低下時に回復してから殴る (DL10+では必須)
+      // 戦闘中回復: HP低下時にLLMに戦術判断を仰ぐ (DL15+)
       const combatHealThreshold = isExtremeDeep ? 0.65 : isVeryDeep ? 0.55 : isDeep ? 0.5 : 0.4;
+      // LLM戦闘判断: HP40-70%の微妙な範囲でLLMに聞く (50ターンに1回、コスト制限)
+      const llmCombatCooldown = (globalThis as any).__llmCombatCd ?? 0;
+      if (LLM_ENABLED && state.depth >= 15 && hpPct >= 0.3 && hpPct < 0.7 && adjacentMonsters.length >= 1
+          && state.turn - llmCombatCooldown >= 50) {
+        (globalThis as any).__llmCombatCd = state.turn;
+        const llmAction = await llmHealOrFlee(state, adjacentMonsters, hpPct);
+        if (llmAction === "flee") {
+          const teleSlotLlm = findTeleportScroll(inv);
+          if (teleSlotLlm !== null) {
+            fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+            addLesson(state.turn, state.depth, "LLM逃走判断",
+              `HP${Math.round(hpPct*100)}%、隣接${adjacentMonsters.length}体。LLMがFLEE推奨`);
+            state = await sendCommand({ type: CMD.READ, itemIndex: teleSlotLlm });
+            stuckCount = 0; noProgressCount = 0; visited.clear(); lastVisitedSize = 0;
+            continue;
+          }
+        }
+        // llmAction === "fight" → 回復せずに殴る (DPS高いなら有効)
+        if (llmAction === "fight" && hpPct >= 0.4) {
+          // skip healing, fall through to attack
+        } else if (llmAction === "heal" || llmAction === null) {
+          // heal → 通常のヒーリングロジックへ
+        }
+      }
       if (hpPct < combatHealThreshold && adjacentMonsters.length <= 2) {
         // 回復スペルがあればスペル優先
         if (canCastSpells) {
@@ -2492,9 +2693,11 @@ async function playGame() {
             break;
           }
           if (currentEquip2 && invPower2 > itemPower(currentEquip2)) {
-            // LLM装備判断: 武器変更時にLLMに確認（blows低下リスク）
+            // LLM装備判断: 武器(blowsリスク)と耐性付き防具(トレードオフ)
             let doSwap = true;
-            if (LLM_ENABLED && WEAPON_TVALS.has(invItem.tval)) {
+            const hasResists = (invItem.resists ?? []).some((r: any) => r.level > 0);
+            const currentHasResists = (currentEquip2.resists ?? []).some((r: any) => r.level > 0);
+            if (LLM_ENABLED && (WEAPON_TVALS.has(invItem.tval) || hasResists || currentHasResists)) {
               const llmOk = await llmChooseEquipment(state, currentEquip2, invItem);
               if (llmOk === false) {
                 doSwap = false;
@@ -2674,30 +2877,56 @@ async function playGame() {
     const resistPenaltyTurns = resistDeficit * 3000;
     const resistOk = resistDeficit === 0;
 
-    // CLが低すぎる場合は降下を控える (DLとCLの乖離チェック — 深層ではより厳しく)
-    // DL30+で比率引き上げ。DL30でCL24必要(0.8), DL20でCL16(0.8), DL10でCL8(0.75)
-    const minClRatio = state.depth >= 30 ? 0.8 : state.depth >= 20 ? 0.8 : state.depth >= 10 ? 0.75 : 0.6;
-    const clOk = p.level >= Math.floor(state.depth * minClRatio) || state.depth <= 3;
+    // CLが低すぎる場合は降下を控える (v12d設定に戻す — 緩めゲート + LLM判断)
+    const minClRatio = state.depth >= 30 ? 0.8 : state.depth >= 20 ? 0.75 : state.depth >= 10 ? 0.7 : 0.5;
+    // 絶対最低CL: DL10→CL8, DL15→CL12, DL20→CL16, DL25→CL20, DL30→CL25
+    const absoluteMinCl = state.depth >= 30 ? 25 : state.depth >= 25 ? 20 : state.depth >= 20 ? 16 : state.depth >= 15 ? 12 : state.depth >= 10 ? 8 : 0;
+    const clOk = (p.level >= Math.floor(state.depth * minClRatio) && p.level >= absoluteMinCl) || state.depth <= 3;
+
+    // === 装備品質ゲート (v9: CLだけでなく装備の準備状況もチェック) ===
+    // DL15+: blows >= 2 (最低限の火力)
+    // DL20+: blows >= 3 OR 武器ダメージが十分 (高品質武器なら2 blowsでもOK)
+    // DL25+: 基本耐性2つ以上 (Fire+Cold推奨)
+    const currentBlows = p.numBlows ?? 2;
+    const currentWeapon = (p.equipment ?? []).find((e: any) => WEAPON_TVALS.has(e.tval));
+    const weaponBaseDmg = currentWeapon ? ((currentWeapon.dd ?? 1) * ((currentWeapon.ds ?? 4) + 1) / 2 + (currentWeapon.toD ?? 0) + (p.toD ?? 0)) : 10;
+    const estimatedDps = weaponBaseDmg * currentBlows;
+    // DPS基準: DL15で30+, DL20で45+, DL25で60+, DL30で70+
+    const minDpsForDepth = state.depth >= 30 ? 70 : state.depth >= 25 ? 60 : state.depth >= 20 ? 45 : state.depth >= 15 ? 30 : 0;
+    const dpsOk = estimatedDps >= minDpsForDepth || state.depth < 15;
+    // 耐性基準: DL25+で基本耐性2+, DL30+で基本耐性3+
+    const minResistForDepth = state.depth >= 30 ? 3 : state.depth >= 25 ? 2 : 0;
+    const equipResistOk = baseResistCount >= minResistForDepth || state.depth < 25;
+    // AC基準: DL20+でAC60+, DL30+でAC80+
+    const minAcForDepth = state.depth >= 30 ? 80 : state.depth >= 20 ? 60 : 0;
+    const acOk = (p.ac ?? 0) >= minAcForDepth || state.depth < 20;
+    // 総合装備チェック: 3つ全部OK or 超長期滞在で緩和
+    const equipmentReady = dpsOk && equipResistOk && acOk;
 
     // tooLongOnLevelでもclOkは必須 (レベル不足での降下は死因上位)
-    // ただし超長期滞在(2x閾値)ではCLチェックも緩和
+    // ただし超長期滞在(2x閾値)ではCLチェック・装備チェックも緩和
     const veryLongOnLevel = turnsOnLevel > tooLongThreshold * 2;
     const clCheck = clOk || veryLongOnLevel;
+    const equipCheck = equipmentReady || veryLongOnLevel;
     // 耐性ソフトゲート: 不足分×3000ターン追加滞在で降下許可
     const resistCheck = resistOk || turnsOnLevel > resistPenaltyTurns;
-    const readyToDescend = hpPct >= 0.7 && healingOk && escapeOk && resistCheck &&
+    const readyToDescend = hpPct >= 0.7 && healingOk && escapeOk && resistCheck && equipCheck &&
       ((clCheck && (enoughKills || explorationStalled || tooLongOnLevel || overleveled)) || lowExplorationEarlyDescent);
 
-    // LLM降下判断: DL15+で初回のみLLMに確認（1フロア1回限り）
+    // LLM降下判断: DL15+でLLMに確認（深度ごとに最大2回まで）
     let llmDescentVeto = false;
     if (readyToDescend && LLM_ENABLED && state.depth >= 15) {
-      const vetoKey = `descent_veto_${state.depth}`;
-      if (!(globalThis as any)[vetoKey]) {
+      const vetoCountKey = `descent_veto_count_${state.depth}`;
+      const vetoCount = (globalThis as any)[vetoCountKey] ?? 0;
+      if (vetoCount < 2) { // 同じ深度で最大2回までLLMに聞く
         const llmOk = await llmShouldDescend(state);
         if (llmOk === false) {
-          llmDescentVeto = true;
-          (globalThis as any)[vetoKey] = true; // この階では1回だけveto
-          console.log(`  [LLM VETO] 降下を見送り (DL${state.depth}) — この階では以後ルールに従う`);
+          const llmExplore = await llmShouldExploreMore(state, killsThisLevel, turnsOnLevel);
+          if (llmExplore === true || llmExplore === null) {
+            llmDescentVeto = true;
+            (globalThis as any)[vetoCountKey] = vetoCount + 1;
+            console.log(`  [LLM VETO] 降下を見送り (DL${state.depth}, ${vetoCount+1}/3) — LLMが探索続行を推奨`);
+          }
         }
       }
     }
@@ -2708,7 +2937,7 @@ async function playGame() {
         const onStair = tiles.find((t: any) => t.x === px && t.y === py && t.feat === FEAT.DOWN_STAIR);
         if (onStair) {
           addLesson(state.turn, state.depth, "降下",
-            `DL${state.depth}→DL${state.depth+1}。HP${Math.round(hpPct*100)}%、撃破${killsThisLevel}体、耐性${baseResistCount}/4+毒${hasPoisRes ? "○" : "×"}。降下`);
+            `DL${state.depth}→DL${state.depth+1}。HP${Math.round(hpPct*100)}%、撃破${killsThisLevel}体、耐性${baseResistCount}/4+毒${hasPoisRes ? "○" : "×"}、DPS${Math.round(estimatedDps)}、AC${p.ac ?? 0}、${currentBlows}blows。降下`);
           state = await sendCommand({ type: CMD.GO_DOWN });
           if (state.depth > maxDepthReached) {
             maxDepthReached = state.depth;
@@ -3001,8 +3230,7 @@ async function playGame() {
   console.log(`  死亡: ${finalState.dead ? `はい (${deathCause})` : "いいえ"}`);
   console.log(`  行動回数: ${actionCount}`);
   if (LLM_ENABLED) {
-    console.log(`  LLM: ${LLM_BACKEND} 呼出${llmCallCount}回 キャッシュ${llmCacheHits}回 (平均${llmCallCount > 0 ? Math.round(llmTotalMs / llmCallCount) : 0}ms)`);
-    saveLLMCache();
+    console.log(`  LLM: ${LLM_BACKEND} 呼出${llmCallCount}回 (平均${llmCallCount > 0 ? Math.round(llmTotalMs / llmCallCount) : 0}ms)`);
   }
 
   // 最終フレーム + 録画保存
@@ -3029,6 +3257,28 @@ async function playGame() {
     lessons,
     tactics: extractTactics(),
   };
+
+  // クロスラン記憶: 教訓を保存
+  if (finalState.dead) {
+    const resists = (fp.resistances ?? []).filter((r: any) => r.level > 0).map((r: any) => r.elem);
+    const resistStr = resists.length > 0 ? resists.join(",") : "none";
+    const lastDescent = lessons.filter(l => l.event === "降下").pop();
+    const blowsMatch = lastDescent?.lesson.match(/(\d+)blows/);
+    const dpsMatch = lastDescent?.lesson.match(/DPS(\d+)/);
+    const acMatch = lastDescent?.lesson.match(/AC(\d+)/);
+    const wisdom: WisdomEntry = {
+      seed: 0, maxDL: maxDepthReached, maxCL: maxLevelReached,
+      deathDL: finalState.depth ?? maxDepthReached,
+      deathCause,
+      hadResists: resistStr,
+      ac: acMatch ? Number(acMatch[1]) : fp.ac ?? 0,
+      dps: dpsMatch ? Number(dpsMatch[1]) : 0,
+      blows: blowsMatch ? Number(blowsMatch[1]) : 0,
+      lesson: generateDeathWisdom(finalState, deathCause),
+    };
+    saveWisdom(wisdom);
+    console.log(`  [WISDOM] 教訓保存: ${wisdom.lesson.slice(0, 80)}`);
+  }
 
   const reportPath = "/tmp/busho-play-report.json";
   const fs = await import("node:fs");
