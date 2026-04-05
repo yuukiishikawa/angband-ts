@@ -312,8 +312,9 @@ function isDangerousMonster(mon: {
     if (mon.speed > 120) return true;
     if (mon.level > playerLevel * 1.5 && mon.level >= 10) return true;
     if (mon.maxhp > 200 && mon.level > playerLevel + 3) return true;
-    // 高HP敵 (hydra, golem等) は消耗戦で不利 — HP300+は逃走対象
+    // 高HP敵 (hydra, golem, knight等) は消耗戦で不利
     if (mon.maxhp >= 300) return true;
+    if (mon.maxhp >= 200 && depth >= 30) return true;
     // 耐性なしブレス持ちで格上 → 危険
     if (hasUnresistedBreath && mon.level >= playerLevel) return true;
     // 召喚持ちは同レベル以上で危険
@@ -1877,7 +1878,7 @@ async function playGame() {
         && monsters.filter((m: any) => m.distance <= 3).length === 0) {
       const cureQty2 = inv.filter((i: any) => i.name?.includes("Cure") && i.qty > 0)
         .reduce((s: number, i: any) => s + i.qty, 0);
-      const minCureForDepth = state.depth >= 20 ? 8 : state.depth >= 15 ? 5 : 3;
+      const minCureForDepth = state.depth >= 35 ? 15 : state.depth >= 25 ? 10 : state.depth >= 20 ? 8 : state.depth >= 15 ? 5 : 3;
       // ルール基準 OR LLM判断で帰還
       let shouldRecall = cureQty2 < minCureForDepth;
       const llmRecallCd = (globalThis as any).__llmRecallCd ?? 0;
@@ -2237,6 +2238,18 @@ async function playGame() {
       const isTooFastToFight = dangerMon.speed >= 130 && (dangerMon.level >= p.level * 0.7 || dangerMon.level >= 15);
       const isTooToughToFight = (dangerMon.isUnique && dangerMon.maxhp > 200) ||
         (dangerMon.isUnique && dangerMon.level > p.level + 3);
+
+      // DL30+ユニーク: 2回逃走したらWoR帰還 (Lokkak等の追跡型ユニーク対策)
+      if (dangerMon.isUnique && state.depth >= 30 && monFleeCount >= 2 && !(p.wordRecall > 0)) {
+        const recallSlotUniq = findRecallScroll(inv);
+        if (recallSlotUniq !== null) {
+          fleeAttempts++; retreatMode = true; retreatStartTurn = state.turn;
+          addLesson(state.turn, state.depth, "ユニーク帰還",
+            `${dangerMon.name}(Lv${dangerMon.level})から${monFleeCount+1}回逃走。DL30+ユニーク→WoR帰還`);
+          state = await sendCommand({ type: CMD.READ, itemIndex: recallSlotUniq });
+          continue;
+        }
+      }
 
       // 6回以上逃走 → もう逃げるのは無駄。forceFight登録して戦闘に移行 (強敵は除外)
       if (monFleeCount >= 6 && !isTooFastToFight && !isTooToughToFight) {
